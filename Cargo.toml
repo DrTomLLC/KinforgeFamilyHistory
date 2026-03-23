@@ -1,0 +1,44 @@
+[workspace]
+members = [
+    "kinforge_core",
+    "kinforge_storage",
+    "kinforge_config",
+    "kinforge_query",
+    "kinforge_import_export",
+    "kinforge_app",
+    "kinforge_reports",
+    "kinforge_viz",
+    "kinforge_plugin_api",
+    "kinforge_sync",
+    "kinforge_ui_desktop",
+    "kinforge_cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Kinforge Contributors"]
+
+[workspace.dependencies]
+kinforge_core = { path = "kinforge_core" }
+kinforge_storage = { path = "kinforge_storage" }
+kinforge_config = { path = "kinforge_config" }
+kinforge_query = { path = "kinforge_query" }
+kinforge_import_export = { path = "kinforge_import_export" }
+kinforge_app = { path = "kinforge_app" }
+kinforge_reports = { path = "kinforge_reports" }
+kinforge_viz = { path = "kinforge_viz" }
+kinforge_plugin_api = { path = "kinforge_plugin_api" }
+kinforge_sync = { path = "kinforge_sync" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"

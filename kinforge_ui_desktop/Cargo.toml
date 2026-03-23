@@ -1,0 +1,13 @@
+[package]
+name = "kinforge_ui_desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kinforge-desktop"
+path = "src/main.rs"
+
+[dependencies]
+kinforge_app = { workspace = true }
+kinforge_core = { workspace = true }
