@@ -1,0 +1,14 @@
+[package]
+name = "kinforge_app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kinforge_core = { workspace = true }
+kinforge_storage = { workspace = true }
+kinforge_config = { workspace = true }
+kinforge_query = { workspace = true }
+kinforge_import_export = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

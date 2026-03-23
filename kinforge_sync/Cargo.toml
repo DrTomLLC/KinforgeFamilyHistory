@@ -1,0 +1,8 @@
+[package]
+name = "kinforge_sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kinforge_core = { workspace = true }
