@@ -16,17 +16,20 @@ pub enum ReportCommands {
     /// Ancestor chart
     Ancestors {
         id: String,
-        #[arg(long, default_value = "4")] generations: u32,
+        #[arg(long, default_value = "4")]
+        generations: u32,
     },
     /// Descendant chart
     Descendants {
         id: String,
-        #[arg(long, default_value = "4")] generations: u32,
+        #[arg(long, default_value = "4")]
+        generations: u32,
     },
     /// ASCII family tree (descendants)
     Tree {
         id: String,
-        #[arg(long, default_value = "3")] depth: u32,
+        #[arg(long, default_value = "3")]
+        depth: u32,
     },
 }
 

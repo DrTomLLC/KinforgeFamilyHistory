@@ -7,13 +7,18 @@ use kinforge_core::models::{EventDate, EventId, EventType, PersonId};
 pub enum EventCommands {
     /// Add an event for a person
     Add {
-        #[arg(long)] person: String,
-        #[arg(long)] event_type: String,
+        #[arg(long)]
+        person: String,
+        #[arg(long)]
+        event_type: String,
         /// Exact date (YYYY-MM-DD)
-        #[arg(long)] date: Option<String>,
+        #[arg(long)]
+        date: Option<String>,
         /// Optional place name
-        #[arg(long)] place: Option<String>,
-        #[arg(long)] notes: Option<String>,
+        #[arg(long)]
+        place: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
     },
     /// List events for a person
     List { person: String },
@@ -22,8 +27,10 @@ pub enum EventCommands {
     /// Update an event's date or notes
     Update {
         id: String,
-        #[arg(long)] date: Option<String>,
-        #[arg(long)] notes: Option<String>,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
     },
     /// Delete an event
     Delete { id: String },
@@ -31,12 +38,22 @@ pub enum EventCommands {
 
 pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
     match cmd {
-        EventCommands::Add { person, event_type, date, place, notes } => {
+        EventCommands::Add {
+            person,
+            event_type,
+            date,
+            place,
+            notes,
+        } => {
             let pid = PersonId::from_str(&person)?;
-            let etype: EventType = event_type.parse().unwrap_or(EventType::Other(event_type.clone()));
-            let event_date = date.as_deref()
+            let etype: EventType = event_type
+                .parse()
+                .unwrap_or(EventType::Other(event_type.clone()));
+            let event_date = date
+                .as_deref()
                 .and_then(|d| EventDate::from_parts("exact", Some(d), None));
-            let event = app.add_event(pid, etype, event_date, place.as_deref(), notes.as_deref())?;
+            let event =
+                app.add_event(pid, etype, event_date, place.as_deref(), notes.as_deref())?;
             println!("Added event: {} (ID: {})", event.event_type, event.id);
         }
 
@@ -48,13 +65,23 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             } else {
                 for e in &events {
                     let date_str = e.date.as_ref().map(|d| d.to_string()).unwrap_or_default();
-                    let place_str = e.place_id.as_ref()
+                    let place_str = e
+                        .place_id
+                        .as_ref()
                         .and_then(|pid| app.db.get_place(pid).ok())
                         .map(|pl| format!(" @ {}", pl.name))
                         .unwrap_or_default();
-                    println!("  [{}] {}{}{}", e.id, e.event_type,
-                        if date_str.is_empty() { "".to_string() } else { format!(": {}", date_str) },
-                        place_str);
+                    println!(
+                        "  [{}] {}{}{}",
+                        e.id,
+                        e.event_type,
+                        if date_str.is_empty() {
+                            "".to_string()
+                        } else {
+                            format!(": {}", date_str)
+                        },
+                        place_str
+                    );
                 }
             }
         }
@@ -82,10 +109,13 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
                 for c in &citations {
                     let src = app.db.get_source(&c.source_id);
                     let src_title = src.map(|s| s.title).unwrap_or_else(|_| "?".to_string());
-                    println!("  [{}] {} | {} | conf: {}",
-                        c.id, src_title,
+                    println!(
+                        "  [{}] {} | {} | conf: {}",
+                        c.id,
+                        src_title,
                         c.page.as_deref().unwrap_or("no page"),
-                        c.confidence);
+                        c.confidence
+                    );
                 }
             }
         }

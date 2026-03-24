@@ -8,13 +8,16 @@ pub enum SearchCommands {
     /// Search people by name
     People {
         query: String,
-        #[arg(long)] sex: Option<String>,
+        #[arg(long)]
+        sex: Option<String>,
     },
     /// Search sources by title or author
     Sources {
         query: String,
-        #[arg(long)] from_year: Option<i32>,
-        #[arg(long)] to_year: Option<i32>,
+        #[arg(long)]
+        from_year: Option<i32>,
+        #[arg(long)]
+        to_year: Option<i32>,
     },
 }
 
@@ -36,7 +39,11 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             }
         }
 
-        SearchCommands::Sources { query, from_year, to_year } => {
+        SearchCommands::Sources {
+            query,
+            from_year,
+            to_year,
+        } => {
             let mut q = SourceQuery::new().title_contains(&query);
             if let (Some(f), Some(t)) = (from_year, to_year) {
                 q = q.year_range(f, t);

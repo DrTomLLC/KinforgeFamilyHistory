@@ -26,9 +26,10 @@ impl EventDate {
 
     pub fn date_str(&self) -> Option<String> {
         match self {
-            EventDate::Exact(d) | EventDate::Approximate(d) | EventDate::Before(d) | EventDate::After(d) => {
-                Some(d.format("%Y-%m-%d").to_string())
-            }
+            EventDate::Exact(d)
+            | EventDate::Approximate(d)
+            | EventDate::Before(d)
+            | EventDate::After(d) => Some(d.format("%Y-%m-%d").to_string()),
             EventDate::Between(d1, _) => Some(d1.format("%Y-%m-%d").to_string()),
             EventDate::Unknown => None,
         }
@@ -41,24 +42,15 @@ impl EventDate {
         }
     }
 
-    pub fn from_parts(
-        kind: &str,
-        date_val: Option<&str>,
-        date_val2: Option<&str>,
-    ) -> Option<Self> {
-        let parse = |s: &str| -> Option<NaiveDate> {
-            NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
-        };
+    pub fn from_parts(kind: &str, date_val: Option<&str>, date_val2: Option<&str>) -> Option<Self> {
+        let parse =
+            |s: &str| -> Option<NaiveDate> { NaiveDate::parse_from_str(s, "%Y-%m-%d").ok() };
 
         match kind {
-            "exact" => parse(date_val?)
-                .map(EventDate::Exact),
-            "approximate" => parse(date_val?)
-                .map(EventDate::Approximate),
-            "before" => parse(date_val?)
-                .map(EventDate::Before),
-            "after" => parse(date_val?)
-                .map(EventDate::After),
+            "exact" => parse(date_val?).map(EventDate::Exact),
+            "approximate" => parse(date_val?).map(EventDate::Approximate),
+            "before" => parse(date_val?).map(EventDate::Before),
+            "after" => parse(date_val?).map(EventDate::After),
             "between" => {
                 let d1 = parse(date_val?)?;
                 let d2 = parse(date_val2?)?;
@@ -78,7 +70,12 @@ impl fmt::Display for EventDate {
             EventDate::Before(d) => write!(f, "before {}", d.format("%d %b %Y")),
             EventDate::After(d) => write!(f, "after {}", d.format("%d %b %Y")),
             EventDate::Between(d1, d2) => {
-                write!(f, "between {} and {}", d1.format("%d %b %Y"), d2.format("%d %b %Y"))
+                write!(
+                    f,
+                    "between {} and {}",
+                    d1.format("%d %b %Y"),
+                    d2.format("%d %b %Y")
+                )
             }
             EventDate::Unknown => write!(f, "unknown"),
         }

@@ -30,7 +30,10 @@ impl Application {
 
     pub fn open_in_memory() -> KinforgeResult<Self> {
         let db = Database::open_in_memory()?;
-        Ok(Self { db, config: Config::default() })
+        Ok(Self {
+            db,
+            config: Config::default(),
+        })
     }
 
     // ── Statistics ─────────────────────────────────────────────────────────
@@ -114,7 +117,7 @@ impl Application {
         notes: Option<&str>,
     ) -> KinforgeResult<Event> {
         let place_id = if let Some(name) = place_name {
-            let mut place = Place::new(name);
+            let place = Place::new(name);
             validation::validate_place(&place)?;
             self.db.insert_place(&place)?;
             Some(place.id)

@@ -110,7 +110,11 @@ fn parse_top_level(content: &str) -> KinforgeResult<Vec<GedcomRecord>> {
             counter += 1;
             let xref = gl.xref_id.unwrap_or_else(|| format!("AUTO{}", counter));
             let tag = gl.tag;
-            current = Some(GedcomRecord { xref_id: xref, tag, lines: Vec::new() });
+            current = Some(GedcomRecord {
+                xref_id: xref,
+                tag,
+                lines: Vec::new(),
+            });
         } else if let Some(ref mut rec) = current {
             rec.lines.push(GedcomLine {
                 level: gl.level,
@@ -136,9 +140,9 @@ struct RawLine {
 fn parse_line(s: &str) -> KinforgeResult<RawLine> {
     let mut parts = s.splitn(4, ' ');
     let level_str = parts.next().unwrap_or("0");
-    let level: u8 = level_str.parse().map_err(|_| {
-        KinforgeError::ImportExport(format!("Bad GEDCOM level: {}", level_str))
-    })?;
+    let level: u8 = level_str
+        .parse()
+        .map_err(|_| KinforgeError::ImportExport(format!("Bad GEDCOM level: {}", level_str)))?;
 
     let second = parts.next().unwrap_or("").trim();
     let third = parts.next().map(|s| s.trim().to_string());
@@ -149,7 +153,12 @@ fn parse_line(s: &str) -> KinforgeResult<RawLine> {
         let xref = second[1..second.len() - 1].to_string();
         let tag = third.clone().unwrap_or_default();
         let value = fourth;
-        return Ok(RawLine { level, xref_id: Some(xref), tag, value });
+        return Ok(RawLine {
+            level,
+            xref_id: Some(xref),
+            tag,
+            value,
+        });
     }
 
     // Normal lines: `N TAG [value]`
@@ -160,7 +169,12 @@ fn parse_line(s: &str) -> KinforgeResult<RawLine> {
         (Some(t), None) => Some(t),
         (Some(t), Some(f)) => Some(format!("{} {}", t, f)),
     };
-    Ok(RawLine { level, xref_id: None, tag, value })
+    Ok(RawLine {
+        level,
+        xref_id: None,
+        tag,
+        value,
+    })
 }
 
 // ── Individual parser ─────────────────────────────────────────────────────────
@@ -240,7 +254,10 @@ fn parse_event_sublines(
             }
         }
     }
-    Ok(PendingEvent { event, pending_place })
+    Ok(PendingEvent {
+        event,
+        pending_place,
+    })
 }
 
 fn parse_gedcom_date(s: &str) -> Option<EventDate> {
@@ -351,15 +368,37 @@ fn parse_gedcom_name(val: &str) -> PersonName {
         .filter(|s| !s.is_empty());
 
         let given = val[..slash1].trim();
-        let given = if given.is_empty() { None } else { Some(given.to_string()) };
+        let given = if given.is_empty() {
+            None
+        } else {
+            Some(given.to_string())
+        };
 
-        PersonName { given, surname, name_type: NameType::Birth, prefix: None, suffix: None }
+        PersonName {
+            given,
+            surname,
+            name_type: NameType::Birth,
+            prefix: None,
+            suffix: None,
+        }
     } else {
         let trimmed = val.trim().to_string();
         if trimmed.is_empty() {
-            PersonName { given: None, surname: None, name_type: NameType::Birth, prefix: None, suffix: None }
+            PersonName {
+                given: None,
+                surname: None,
+                name_type: NameType::Birth,
+                prefix: None,
+                suffix: None,
+            }
         } else {
-            PersonName { given: Some(trimmed), surname: None, name_type: NameType::Birth, prefix: None, suffix: None }
+            PersonName {
+                given: Some(trimmed),
+                surname: None,
+                name_type: NameType::Birth,
+                prefix: None,
+                suffix: None,
+            }
         }
     }
 }
@@ -430,11 +469,18 @@ fn parse_family_record(
 
     // Spouse relationship
     if let (Some(ref h), Some(ref w)) = (&husb, &wife) {
-        rels.push(Relationship::new(RelationshipType::Spouse, h.clone(), w.clone()));
+        rels.push(Relationship::new(
+            RelationshipType::Spouse,
+            h.clone(),
+            w.clone(),
+        ));
     }
 
     // Parent→child relationships
-    let parents: Vec<&PersonId> = [husb.as_ref(), wife.as_ref()].into_iter().flatten().collect();
+    let parents: Vec<&PersonId> = [husb.as_ref(), wife.as_ref()]
+        .into_iter()
+        .flatten()
+        .collect();
     for child_id in &children {
         for parent_id in &parents {
             rels.push(Relationship::new(

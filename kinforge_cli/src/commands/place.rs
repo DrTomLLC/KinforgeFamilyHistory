@@ -7,9 +7,12 @@ use kinforge_core::models::PlaceId;
 pub enum PlaceCommands {
     /// Add a place
     Add {
-        #[arg(long)] name: String,
-        #[arg(long)] latitude: Option<f64>,
-        #[arg(long)] longitude: Option<f64>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        latitude: Option<f64>,
+        #[arg(long)]
+        longitude: Option<f64>,
     },
     /// List all places
     List,
@@ -18,9 +21,12 @@ pub enum PlaceCommands {
     /// Update a place's name or coordinates
     Update {
         id: String,
-        #[arg(long)] name: Option<String>,
-        #[arg(long)] latitude: Option<f64>,
-        #[arg(long)] longitude: Option<f64>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        latitude: Option<f64>,
+        #[arg(long)]
+        longitude: Option<f64>,
     },
     /// Delete a place
     Delete { id: String },
@@ -28,7 +34,11 @@ pub enum PlaceCommands {
 
 pub fn handle(cmd: PlaceCommands, app: &Application) -> Result<()> {
     match cmd {
-        PlaceCommands::Add { name, latitude, longitude } => {
+        PlaceCommands::Add {
+            name,
+            latitude,
+            longitude,
+        } => {
             let place = app.add_place(&name, latitude, longitude)?;
             println!("Added place: {} (ID: {})", place.name, place.id);
         }
@@ -54,16 +64,31 @@ pub fn handle(cmd: PlaceCommands, app: &Application) -> Result<()> {
             let p = app.db.get_place(&pid)?;
             println!("ID:   {}", p.id);
             println!("Name: {}", p.name);
-            if let Some(lat) = p.latitude { println!("Lat:  {}", lat); }
-            if let Some(lon) = p.longitude { println!("Lon:  {}", lon); }
+            if let Some(lat) = p.latitude {
+                println!("Lat:  {}", lat);
+            }
+            if let Some(lon) = p.longitude {
+                println!("Lon:  {}", lon);
+            }
         }
 
-        PlaceCommands::Update { id, name, latitude, longitude } => {
+        PlaceCommands::Update {
+            id,
+            name,
+            latitude,
+            longitude,
+        } => {
             let pid = PlaceId::from_str(&id)?;
             let mut place = app.db.get_place(&pid)?;
-            if let Some(n) = name { place.name = n; }
-            if let Some(lat) = latitude { place.latitude = Some(lat); }
-            if let Some(lon) = longitude { place.longitude = Some(lon); }
+            if let Some(n) = name {
+                place.name = n;
+            }
+            if let Some(lat) = latitude {
+                place.latitude = Some(lat);
+            }
+            if let Some(lon) = longitude {
+                place.longitude = Some(lon);
+            }
             app.update_place(place)?;
             println!("Updated place {}.", id);
         }

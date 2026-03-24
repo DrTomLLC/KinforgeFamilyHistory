@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use kinforge_core::{
-    models::*,
-    KinforgeError, KinforgeResult,
-};
+use kinforge_core::{models::*, KinforgeError, KinforgeResult};
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 use crate::migrations::run_migrations;
+
+/// Column tuple returned by relationship SQL queries.
+type RelRow = (String, String, String, String, Option<String>);
 
 pub struct Database {
     conn: Connection,
@@ -21,8 +21,8 @@ impl Database {
     }
 
     pub fn open_in_memory() -> KinforgeResult<Self> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| KinforgeError::Storage(e.to_string()))?;
         run_migrations(&conn).map_err(|e| KinforgeError::Storage(e.to_string()))?;
         Ok(Self { conn })
     }
@@ -33,11 +33,7 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO people (id, sex, notes) VALUES (?1, ?2, ?3)",
-                params![
-                    person.id.as_str(),
-                    person.sex.to_string(),
-                    person.notes,
-                ],
+                params![person.id.as_str(), person.sex.to_string(), person.notes,],
             )
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
 
@@ -46,14 +42,11 @@ impl Database {
     }
 
     pub fn update_person(&self, person: &Person) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute(
                 "UPDATE people SET sex = ?2, notes = ?3 WHERE id = ?1",
-                params![
-                    person.id.as_str(),
-                    person.sex.to_string(),
-                    person.notes,
-                ],
+                params![person.id.as_str(), person.sex.to_string(), person.notes,],
             )
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
 
@@ -67,7 +60,11 @@ impl Database {
         Ok(())
     }
 
-    fn replace_person_names(&self, person_id: &PersonId, names: &[PersonName]) -> KinforgeResult<()> {
+    fn replace_person_names(
+        &self,
+        person_id: &PersonId,
+        names: &[PersonName],
+    ) -> KinforgeResult<()> {
         self.conn
             .execute(
                 "DELETE FROM person_names WHERE person_id = ?1",
@@ -117,8 +114,8 @@ impl Database {
                 other => KinforgeError::Storage(other.to_string()),
             })?;
 
-        let person_id = PersonId::from_str(&row.0)
-            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let person_id =
+            PersonId::from_str(&row.0).map_err(|e| KinforgeError::Storage(e.to_string()))?;
         let sex: Sex = row.1.parse().unwrap_or(Sex::Unknown);
         let names = self.get_names_for_person(&person_id)?;
 
@@ -171,8 +168,8 @@ impl Database {
 
         ids.iter()
             .map(|id| {
-                let pid = PersonId::from_str(id)
-                    .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+                let pid =
+                    PersonId::from_str(id).map_err(|e| KinforgeError::Storage(e.to_string()))?;
                 self.get_person(&pid)
             })
             .collect()
@@ -199,8 +196,8 @@ impl Database {
 
         ids.iter()
             .map(|id| {
-                let pid = PersonId::from_str(id)
-                    .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+                let pid =
+                    PersonId::from_str(id).map_err(|e| KinforgeError::Storage(e.to_string()))?;
                 self.get_person(&pid)
             })
             .collect()
@@ -216,10 +213,7 @@ impl Database {
     pub fn delete_person(&self, id: &PersonId) -> KinforgeResult<()> {
         let affected = self
             .conn
-            .execute(
-                "DELETE FROM people WHERE id = ?1",
-                params![id.as_str()],
-            )
+            .execute("DELETE FROM people WHERE id = ?1", params![id.as_str()])
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
         if affected == 0 {
             return Err(KinforgeError::NotFound {
@@ -255,7 +249,8 @@ impl Database {
 
     pub fn update_event(&self, event: &Event) -> KinforgeResult<()> {
         let (date_kind, date_val, date_val2) = decompose_date(&event.date);
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute(
                 "UPDATE events SET event_type = ?2, date_kind = ?3, date_value = ?4,
                  date_value2 = ?5, place_id = ?6, notes = ?7 WHERE id = ?1",
@@ -324,7 +319,8 @@ impl Database {
     }
 
     pub fn delete_event(&self, id: &EventId) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute("DELETE FROM events WHERE id = ?1", params![id.as_str()])
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
         if affected == 0 {
@@ -401,8 +397,16 @@ impl Database {
             .and_then(|(id_str, name, lat, lon, parent_str)| {
                 let pid = PlaceId::from_str(&id_str)
                     .map_err(|e| KinforgeError::Storage(e.to_string()))?;
-                let parent_id = parent_str.as_deref().and_then(|s| PlaceId::from_str(s).ok());
-                Ok(Place { id: pid, name, latitude: lat, longitude: lon, parent_id })
+                let parent_id = parent_str
+                    .as_deref()
+                    .and_then(|s| PlaceId::from_str(s).ok());
+                Ok(Place {
+                    id: pid,
+                    name,
+                    latitude: lat,
+                    longitude: lon,
+                    parent_id,
+                })
             })
     }
 
@@ -420,15 +424,16 @@ impl Database {
 
         ids.iter()
             .map(|id| {
-                let pid = PlaceId::from_str(id)
-                    .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+                let pid =
+                    PlaceId::from_str(id).map_err(|e| KinforgeError::Storage(e.to_string()))?;
                 self.get_place(&pid)
             })
             .collect()
     }
 
     pub fn delete_place(&self, id: &PlaceId) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute("DELETE FROM places WHERE id = ?1", params![id.as_str()])
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
         if affected == 0 {
@@ -513,7 +518,10 @@ impl Database {
             })
     }
 
-    pub fn list_relationships_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Relationship>> {
+    pub fn list_relationships_for_person(
+        &self,
+        person_id: &PersonId,
+    ) -> KinforgeResult<Vec<Relationship>> {
         fetch_rel_rows(
             &self.conn,
             "SELECT id, rel_type, person1_id, person2_id, notes
@@ -539,8 +547,12 @@ impl Database {
     }
 
     pub fn delete_relationship(&self, id: &RelationshipId) -> KinforgeResult<()> {
-        let affected = self.conn
-            .execute("DELETE FROM relationships WHERE id = ?1", params![id.as_str()])
+        let affected = self
+            .conn
+            .execute(
+                "DELETE FROM relationships WHERE id = ?1",
+                params![id.as_str()],
+            )
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
         if affected == 0 {
             return Err(KinforgeError::NotFound {
@@ -573,7 +585,8 @@ impl Database {
     }
 
     pub fn update_source(&self, source: &Source) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute(
                 "UPDATE sources SET title = ?2, author = ?3, publication = ?4, year = ?5,
                  repository = ?6, notes = ?7 WHERE id = ?1",
@@ -640,15 +653,16 @@ impl Database {
 
         ids.iter()
             .map(|id| {
-                let sid = SourceId::from_str(id)
-                    .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+                let sid =
+                    SourceId::from_str(id).map_err(|e| KinforgeError::Storage(e.to_string()))?;
                 self.get_source(&sid)
             })
             .collect()
     }
 
     pub fn delete_source(&self, id: &SourceId) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute("DELETE FROM sources WHERE id = ?1", params![id.as_str()])
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
         if affected == 0 {
@@ -681,7 +695,8 @@ impl Database {
     }
 
     pub fn update_citation(&self, citation: &Citation) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute(
                 "UPDATE citations SET page = ?2, confidence = ?3, notes = ?4 WHERE id = ?1",
                 params![
@@ -760,7 +775,8 @@ impl Database {
     }
 
     pub fn delete_citation(&self, id: &CitationId) -> KinforgeResult<()> {
-        let affected = self.conn
+        let affected = self
+            .conn
             .execute("DELETE FROM citations WHERE id = ?1", params![id.as_str()])
             .map_err(|e| KinforgeError::Storage(e.to_string()))?;
         if affected == 0 {
@@ -775,84 +791,134 @@ impl Database {
     // ── Statistics ────────────────────────────────────────────────────────────
 
     pub fn stats(&self) -> KinforgeResult<DatabaseStats> {
-        let people = self.conn
+        let people = self
+            .conn
             .query_row("SELECT COUNT(*) FROM people", [], |r| r.get::<_, i64>(0))
             .map_err(|e| KinforgeError::Storage(e.to_string()))? as u64;
-        let events = self.conn
+        let events = self
+            .conn
             .query_row("SELECT COUNT(*) FROM events", [], |r| r.get::<_, i64>(0))
             .map_err(|e| KinforgeError::Storage(e.to_string()))? as u64;
-        let sources = self.conn
+        let sources = self
+            .conn
             .query_row("SELECT COUNT(*) FROM sources", [], |r| r.get::<_, i64>(0))
             .map_err(|e| KinforgeError::Storage(e.to_string()))? as u64;
-        let citations = self.conn
+        let citations = self
+            .conn
             .query_row("SELECT COUNT(*) FROM citations", [], |r| r.get::<_, i64>(0))
             .map_err(|e| KinforgeError::Storage(e.to_string()))? as u64;
-        let relationships = self.conn
-            .query_row("SELECT COUNT(*) FROM relationships", [], |r| r.get::<_, i64>(0))
+        let relationships = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM relationships", [], |r| {
+                r.get::<_, i64>(0)
+            })
             .map_err(|e| KinforgeError::Storage(e.to_string()))? as u64;
-        let places = self.conn
+        let places = self
+            .conn
             .query_row("SELECT COUNT(*) FROM places", [], |r| r.get::<_, i64>(0))
             .map_err(|e| KinforgeError::Storage(e.to_string()))? as u64;
 
-        Ok(DatabaseStats { people, events, sources, citations, relationships, places })
+        Ok(DatabaseStats {
+            people,
+            events,
+            sources,
+            citations,
+            relationships,
+            places,
+        })
     }
 }
 
 // ── Row helpers ───────────────────────────────────────────────────────────────
 
-type EventRow = (String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>);
+type EventRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 // ── Standalone query helpers (stmt fully scoped inside each fn) ───────────────
 
-fn fetch_event_rows(conn: &Connection, sql: &str, param: Option<&str>) -> rusqlite::Result<Vec<EventRow>> {
+fn fetch_event_rows(
+    conn: &Connection,
+    sql: &str,
+    param: Option<&str>,
+) -> rusqlite::Result<Vec<EventRow>> {
     let mut stmt = conn.prepare(sql)?;
     match param {
         Some(p) => stmt.query_map([p], row_to_event)?.collect(),
-        None    => stmt.query_map([], row_to_event)?.collect(),
+        None => stmt.query_map([], row_to_event)?.collect(),
     }
 }
 
-fn fetch_rel_rows(conn: &Connection, sql: &str, param: Option<&str>)
-    -> rusqlite::Result<Vec<(String, String, String, String, Option<String>)>>
-{
+fn fetch_rel_rows(
+    conn: &Connection,
+    sql: &str,
+    param: Option<&str>,
+) -> rusqlite::Result<Vec<RelRow>> {
     let mut stmt = conn.prepare(sql)?;
     match param {
-        Some(p) => stmt.query_map([p], |row| Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        )))?.collect(),
-        None => stmt.query_map([], |row| Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        )))?.collect(),
+        Some(p) => stmt
+            .query_map([p], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect(),
+        None => stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect(),
     }
 }
 
-fn fetch_citation_rows(conn: &Connection, sql: &str, param: Option<&str>) -> rusqlite::Result<Vec<CitationRow>> {
+fn fetch_citation_rows(
+    conn: &Connection,
+    sql: &str,
+    param: Option<&str>,
+) -> rusqlite::Result<Vec<CitationRow>> {
     let mut stmt = conn.prepare(sql)?;
     match param {
-        Some(p) => stmt.query_map([p], |row| Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, Option<String>>(5)?,
-        )))?.collect(),
-        None => stmt.query_map([], |row| Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, Option<String>>(5)?,
-        )))?.collect(),
+        Some(p) => stmt
+            .query_map([p], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect(),
+        None => stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect(),
     }
 }
 
@@ -875,13 +941,28 @@ fn assemble_event(
     let eid = EventId::from_str(&id_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
     let pid = PersonId::from_str(&pid_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
     let event_type: EventType = et_str.parse().unwrap_or(EventType::Other(et_str));
-    let date = dk.as_deref()
+    let date = dk
+        .as_deref()
         .and_then(|k| EventDate::from_parts(k, dv.as_deref(), dv2.as_deref()));
     let place_id = place_str.as_deref().and_then(|s| PlaceId::from_str(s).ok());
-    Ok(Event { id: eid, person_id: pid, event_type, date, place_id, notes })
+    Ok(Event {
+        id: eid,
+        person_id: pid,
+        event_type,
+        date,
+        place_id,
+        notes,
+    })
 }
 
-type CitationRow = (String, String, String, Option<String>, String, Option<String>);
+type CitationRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+);
 
 fn assemble_citation(
     (id_str, sid_str, eid_str, page, conf_str, notes): CitationRow,
@@ -890,26 +971,38 @@ fn assemble_citation(
     let sid = SourceId::from_str(&sid_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
     let eid = EventId::from_str(&eid_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
     let confidence: ConfidenceLevel = conf_str.parse().unwrap_or(ConfidenceLevel::Secondary);
-    Ok(Citation { id: cid, source_id: sid, event_id: eid, page, confidence, notes })
+    Ok(Citation {
+        id: cid,
+        source_id: sid,
+        event_id: eid,
+        page,
+        confidence,
+        notes,
+    })
 }
 
 fn assemble_relationship(
     (id_str, rt_str, p1_str, p2_str, notes): (String, String, String, String, Option<String>),
 ) -> KinforgeResult<Relationship> {
-    let rid = RelationshipId::from_str(&id_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+    let rid =
+        RelationshipId::from_str(&id_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
     let p1 = PersonId::from_str(&p1_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
     let p2 = PersonId::from_str(&p2_str).map_err(|e| KinforgeError::Storage(e.to_string()))?;
-    let rel_type: RelationshipType = rt_str.parse().map_err(|e: KinforgeError| KinforgeError::Storage(e.to_string()))?;
-    Ok(Relationship { id: rid, rel_type, person1_id: p1, person2_id: p2, notes })
+    let rel_type: RelationshipType = rt_str
+        .parse()
+        .map_err(|e: KinforgeError| KinforgeError::Storage(e.to_string()))?;
+    Ok(Relationship {
+        id: rid,
+        rel_type,
+        person1_id: p1,
+        person2_id: p2,
+        notes,
+    })
 }
 
 fn decompose_date(date: &Option<EventDate>) -> (Option<String>, Option<String>, Option<String>) {
     match date {
-        Some(d) => (
-            Some(d.kind_str().to_string()),
-            d.date_str(),
-            d.date2_str(),
-        ),
+        Some(d) => (Some(d.kind_str().to_string()), d.date_str(), d.date2_str()),
         None => (None, None, None),
     }
 }
@@ -997,9 +1090,12 @@ mod tests {
     #[test]
     fn test_search_people() {
         let db = make_db();
-        db.insert_person(&make_person("Alice", "Anderson", Sex::Female)).unwrap();
-        db.insert_person(&make_person("Bob", "Baker", Sex::Male)).unwrap();
-        db.insert_person(&make_person("Alice", "Baker", Sex::Female)).unwrap();
+        db.insert_person(&make_person("Alice", "Anderson", Sex::Female))
+            .unwrap();
+        db.insert_person(&make_person("Bob", "Baker", Sex::Male))
+            .unwrap();
+        db.insert_person(&make_person("Alice", "Baker", Sex::Female))
+            .unwrap();
 
         let results = db.search_people("Alice").unwrap();
         assert_eq!(results.len(), 2);
@@ -1153,7 +1249,8 @@ mod tests {
     fn test_list_people_multiple() {
         let db = make_db();
         for i in 0..5 {
-            db.insert_person(&make_person(&format!("Person{}", i), "Test", Sex::Unknown)).unwrap();
+            db.insert_person(&make_person(&format!("Person{}", i), "Test", Sex::Unknown))
+                .unwrap();
         }
         assert_eq!(db.list_people().unwrap().len(), 5);
     }

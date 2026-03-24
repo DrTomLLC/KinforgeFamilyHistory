@@ -53,7 +53,12 @@ pub fn individual_report(db: &Database, person_id: &PersonId) -> KinforgeResult<
             };
             if let Ok(other) = db.get_person(other_id) {
                 let role = describe_relationship(&rel.rel_type, person_id, &rel.person1_id);
-                out.push_str(&format!("  {} {} ({})\n", role, other.display_name(), other.id));
+                out.push_str(&format!(
+                    "  {} {} ({})\n",
+                    role,
+                    other.display_name(),
+                    other.id
+                ));
             }
         }
     }
