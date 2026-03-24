@@ -329,6 +329,7 @@ dependencies = [
 name = "kinforge_app"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "kinforge_config",
  "kinforge_core",
  "kinforge_import_export",

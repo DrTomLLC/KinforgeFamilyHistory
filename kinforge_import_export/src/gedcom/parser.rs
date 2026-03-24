@@ -1,35 +1,57 @@
+use chrono::NaiveDate;
 use kinforge_core::{models::*, KinforgeError, KinforgeResult};
 use kinforge_storage::Database;
 use std::collections::HashMap;
 
+// ── Public entry point ────────────────────────────────────────────────────────
+
 /// Import a GEDCOM 5.5 file into the database.
 pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats> {
-    let records = parse_gedcom(content)?;
+    let records = parse_top_level(content)?;
     let mut stats = ImportStats::default();
 
-    // First pass: create people
+    // Map gedcom xref → internal ID for cross-references.
     let mut person_map: HashMap<String, PersonId> = HashMap::new();
-    for (tag, record_id, lines) in &records {
-        if tag == "INDI" {
-            let person = parse_individual(lines)?;
-            let gedcom_id = record_id.clone();
-            let person_id = person.id.clone();
+    let mut source_map: HashMap<String, SourceId> = HashMap::new();
+
+    // Pass 1: individuals
+    for rec in &records {
+        if rec.tag == "INDI" {
+            let (person, events) = parse_individual_record(rec)?;
+            person_map.insert(rec.xref_id.clone(), person.id.clone());
             db.insert_person(&person)?;
-            person_map.insert(gedcom_id, person_id);
             stats.people += 1;
+
+            for mut event in events {
+                if let Some(ref place_name) = event.pending_place {
+                    let place = Place::new(place_name.clone());
+                    db.insert_place(&place)?;
+                    event.event.place_id = Some(place.id);
+                }
+                db.insert_event(&event.event)?;
+                stats.events += 1;
+            }
         }
     }
 
-    // Second pass: create sources
-    let mut source_map: HashMap<String, SourceId> = HashMap::new();
-    for (tag, record_id, lines) in &records {
-        if tag == "SOUR" {
-            let source = parse_source(lines)?;
-            let gedcom_id = record_id.clone();
-            let source_id = source.id.clone();
+    // Pass 2: sources
+    for rec in &records {
+        if rec.tag == "SOUR" {
+            let source = parse_source_record(rec)?;
+            source_map.insert(rec.xref_id.clone(), source.id.clone());
             db.insert_source(&source)?;
-            source_map.insert(gedcom_id, source_id);
             stats.sources += 1;
+        }
+    }
+
+    // Pass 3: family records → relationships
+    for rec in &records {
+        if rec.tag == "FAM" {
+            let rels = parse_family_record(rec, &person_map)?;
+            for rel in rels {
+                db.insert_relationship(&rel)?;
+                stats.relationships += 1;
+            }
         }
     }
 
@@ -39,103 +61,122 @@ pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats
 #[derive(Debug, Default)]
 pub struct ImportStats {
     pub people: usize,
-    pub sources: usize,
     pub events: usize,
+    pub sources: usize,
+    pub relationships: usize,
 }
 
-/// Parse GEDCOM into top-level records: (tag, record_id, lines)
-fn parse_gedcom(content: &str) -> KinforgeResult<Vec<(String, String, Vec<GedcomLine>)>> {
-    let mut records = Vec::new();
-    let mut current_record: Option<(String, String, Vec<GedcomLine>)> = None;
-    let mut counter = 0u32;
+// ── GEDCOM record / line structures ──────────────────────────────────────────
 
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let parsed = parse_line(line)?;
-
-        if parsed.level == 0 {
-            if let Some(record) = current_record.take() {
-                records.push(record);
-            }
-            if parsed.tag == "HEAD" || parsed.tag == "TRLR" {
-                continue;
-            }
-            counter += 1;
-            let record_id = parsed
-                .xref_id
-                .clone()
-                .unwrap_or_else(|| format!("AUTO{}", counter));
-            current_record = Some((parsed.tag.clone(), record_id, vec![parsed]));
-        } else if let Some(ref mut record) = current_record {
-            record.2.push(parsed);
-        }
-    }
-    if let Some(record) = current_record.take() {
-        records.push(record);
-    }
-    Ok(records)
+#[derive(Debug)]
+struct GedcomRecord {
+    /// Xref identifier without @, e.g. "I1"
+    xref_id: String,
+    /// Tag, e.g. "INDI", "FAM", "SOUR"
+    tag: String,
+    /// All lines belonging to this record (level ≥ 0)
+    lines: Vec<GedcomLine>,
 }
 
 #[derive(Debug, Clone)]
 struct GedcomLine {
+    level: u8,
+    tag: String,
+    value: Option<String>,
+}
+
+// ── Top-level parser ──────────────────────────────────────────────────────────
+
+fn parse_top_level(content: &str) -> KinforgeResult<Vec<GedcomRecord>> {
+    let mut records: Vec<GedcomRecord> = Vec::new();
+    let mut current: Option<GedcomRecord> = None;
+    let mut counter = 0u32;
+
+    for raw in content.lines() {
+        let line_str = raw.trim();
+        if line_str.is_empty() {
+            continue;
+        }
+        let gl = parse_line(line_str)?;
+
+        if gl.level == 0 {
+            if let Some(rec) = current.take() {
+                records.push(rec);
+            }
+            if gl.tag == "HEAD" || gl.tag == "TRLR" {
+                continue;
+            }
+            // value field on a level-0 line is the tag (xref comes first)
+            counter += 1;
+            let xref = gl.xref_id.unwrap_or_else(|| format!("AUTO{}", counter));
+            let tag = gl.tag;
+            current = Some(GedcomRecord { xref_id: xref, tag, lines: Vec::new() });
+        } else if let Some(ref mut rec) = current {
+            rec.lines.push(GedcomLine {
+                level: gl.level,
+                tag: gl.tag,
+                value: gl.value,
+            });
+        }
+    }
+    if let Some(rec) = current {
+        records.push(rec);
+    }
+    Ok(records)
+}
+
+// Raw parse output before xref/tag are separated for level-0 lines.
+struct RawLine {
     level: u8,
     xref_id: Option<String>,
     tag: String,
     value: Option<String>,
 }
 
-fn parse_line(line: &str) -> KinforgeResult<GedcomLine> {
-    let mut parts = line.splitn(3, ' ');
+fn parse_line(s: &str) -> KinforgeResult<RawLine> {
+    let mut parts = s.splitn(4, ' ');
     let level_str = parts.next().unwrap_or("0");
-    let level: u8 = level_str
-        .parse()
-        .map_err(|_| KinforgeError::ImportExport(format!("Invalid GEDCOM level: {}", level_str)))?;
+    let level: u8 = level_str.parse().map_err(|_| {
+        KinforgeError::ImportExport(format!("Bad GEDCOM level: {}", level_str))
+    })?;
 
     let second = parts.next().unwrap_or("").trim();
-    let rest = parts.next().map(|s| s.trim().to_string());
+    let third = parts.next().map(|s| s.trim().to_string());
+    let fourth = parts.next().map(|s| s.trim().to_string());
 
-    let (xref_id, tag) = if second.starts_with('@') && second.ends_with('@') {
-        // This is an xref_id followed by tag in rest
-        let id = second[1..second.len() - 1].to_string();
-        let tag_str = rest
-            .as_deref()
-            .and_then(|r| r.split_whitespace().next())
-            .unwrap_or("")
-            .to_string();
-        (Some(id), tag_str)
-    } else {
-        (None, second.to_string())
+    // Level-0 lines: `0 @XREF@ TAG [value]`
+    if level == 0 && second.starts_with('@') && second.ends_with('@') {
+        let xref = second[1..second.len() - 1].to_string();
+        let tag = third.clone().unwrap_or_default();
+        let value = fourth;
+        return Ok(RawLine { level, xref_id: Some(xref), tag, value });
+    }
+
+    // Normal lines: `N TAG [value]`
+    let tag = second.to_string();
+    // Re-join third + fourth as value
+    let value = match (third, fourth) {
+        (None, _) => None,
+        (Some(t), None) => Some(t),
+        (Some(t), Some(f)) => Some(format!("{} {}", t, f)),
     };
-
-    // If xref_id was parsed, the value is the part after the tag
-    let value = if xref_id.is_some() {
-        rest.as_deref()
-            .and_then(|r| {
-                let mut p = r.splitn(2, ' ');
-                p.next(); // skip tag
-                p.next().map(|s| s.to_string())
-            })
-    } else {
-        rest
-    };
-
-    Ok(GedcomLine {
-        level,
-        xref_id,
-        tag,
-        value,
-    })
+    Ok(RawLine { level, xref_id: None, tag, value })
 }
 
-fn parse_individual(lines: &[GedcomLine]) -> KinforgeResult<Person> {
-    let mut person = Person::new(Sex::Unknown);
-    let mut i = 1usize; // skip level-0 line
+// ── Individual parser ─────────────────────────────────────────────────────────
 
-    while i < lines.len() {
-        let line = &lines[i];
+struct PendingEvent {
+    event: Event,
+    pending_place: Option<String>,
+}
+
+fn parse_individual_record(rec: &GedcomRecord) -> KinforgeResult<(Person, Vec<PendingEvent>)> {
+    let mut person = Person::new(Sex::Unknown);
+    let mut events: Vec<PendingEvent> = Vec::new();
+
+    let mut i = 0usize;
+    while i < rec.lines.len() {
+        let line = &rec.lines[i];
         if line.level == 1 {
             match line.tag.as_str() {
                 "SEX" => {
@@ -147,61 +188,193 @@ fn parse_individual(lines: &[GedcomLine]) -> KinforgeResult<Person> {
                 }
                 "NAME" => {
                     if let Some(ref val) = line.value {
-                        let name = parse_gedcom_name(val);
-                        person.names.push(name);
+                        person.names.push(parse_gedcom_name(val));
                     }
                 }
                 "NOTE" => {
                     person.notes = line.value.clone();
                 }
-                _ => {}
+                tag => {
+                    if let Some(etype) = gedcom_tag_to_event_type(tag) {
+                        // Collect sub-lines for this event
+                        let sub_start = i + 1;
+                        let mut sub_end = sub_start;
+                        while sub_end < rec.lines.len() && rec.lines[sub_end].level > 1 {
+                            sub_end += 1;
+                        }
+                        let sub = &rec.lines[sub_start..sub_end];
+                        let pe = parse_event_sublines(etype, person.id.clone(), sub)?;
+                        events.push(pe);
+                        i = sub_end;
+                        continue;
+                    }
+                }
             }
         }
         i += 1;
     }
-    Ok(person)
+    Ok((person, events))
+}
+
+fn parse_event_sublines(
+    etype: EventType,
+    person_id: PersonId,
+    sub: &[GedcomLine],
+) -> KinforgeResult<PendingEvent> {
+    let mut event = Event::new(etype, person_id);
+    let mut pending_place: Option<String> = None;
+
+    for line in sub {
+        if line.level == 2 {
+            match line.tag.as_str() {
+                "DATE" => {
+                    event.date = line.value.as_deref().and_then(parse_gedcom_date);
+                }
+                "PLAC" => {
+                    pending_place = line.value.clone();
+                }
+                "NOTE" => {
+                    event.notes = line.value.clone();
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(PendingEvent { event, pending_place })
+}
+
+fn parse_gedcom_date(s: &str) -> Option<EventDate> {
+    let s = s.trim();
+    if s.is_empty() || s == "UNKNOWN" {
+        return Some(EventDate::Unknown);
+    }
+
+    let (prefix, date_str) = if let Some(rest) = s.strip_prefix("ABT ") {
+        ("abt", rest.trim())
+    } else if let Some(rest) = s.strip_prefix("BEF ") {
+        ("bef", rest.trim())
+    } else if let Some(rest) = s.strip_prefix("AFT ") {
+        ("aft", rest.trim())
+    } else if let Some(rest) = s.strip_prefix("BET ") {
+        let parts: Vec<&str> = rest.splitn(2, " AND ").collect();
+        if parts.len() == 2 {
+            let d1 = parse_gedcom_date_value(parts[0].trim())?;
+            let d2 = parse_gedcom_date_value(parts[1].trim())?;
+            return Some(EventDate::Between(d1, d2));
+        }
+        return None;
+    } else {
+        ("exact", s)
+    };
+
+    let d = parse_gedcom_date_value(date_str)?;
+    match prefix {
+        "abt" => Some(EventDate::Approximate(d)),
+        "bef" => Some(EventDate::Before(d)),
+        "aft" => Some(EventDate::After(d)),
+        _ => Some(EventDate::Exact(d)),
+    }
+}
+
+fn parse_gedcom_date_value(s: &str) -> Option<NaiveDate> {
+    // Try various formats: "15 JAN 1900", "JAN 1900", "1900"
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    match parts.as_slice() {
+        [day, month, year] => {
+            let m = month_abbr_to_num(month)?;
+            let d: u32 = day.parse().ok()?;
+            let y: i32 = year.parse().ok()?;
+            NaiveDate::from_ymd_opt(y, m, d)
+        }
+        [month, year] => {
+            let m = month_abbr_to_num(month)?;
+            let y: i32 = year.parse().ok()?;
+            NaiveDate::from_ymd_opt(y, m, 1)
+        }
+        [year] => {
+            let y: i32 = year.parse().ok()?;
+            NaiveDate::from_ymd_opt(y, 1, 1)
+        }
+        _ => None,
+    }
+}
+
+fn month_abbr_to_num(s: &str) -> Option<u32> {
+    match s.to_uppercase().as_str() {
+        "JAN" => Some(1),
+        "FEB" => Some(2),
+        "MAR" => Some(3),
+        "APR" => Some(4),
+        "MAY" => Some(5),
+        "JUN" => Some(6),
+        "JUL" => Some(7),
+        "AUG" => Some(8),
+        "SEP" => Some(9),
+        "OCT" => Some(10),
+        "NOV" => Some(11),
+        "DEC" => Some(12),
+        _ => None,
+    }
+}
+
+fn gedcom_tag_to_event_type(tag: &str) -> Option<EventType> {
+    match tag {
+        "BIRT" => Some(EventType::Birth),
+        "DEAT" => Some(EventType::Death),
+        "MARR" => Some(EventType::Marriage),
+        "DIV" | "DIVF" => Some(EventType::Divorce),
+        "BURI" => Some(EventType::Burial),
+        "BAPT" | "CHR" => Some(EventType::Baptism),
+        "RESI" => Some(EventType::Residence),
+        "OCCU" => Some(EventType::Occupation),
+        "EDUC" => Some(EventType::Education),
+        "MILI" => Some(EventType::Military),
+        "NATU" => Some(EventType::Naturalization),
+        "CENS" => Some(EventType::Census),
+        "EMIG" => Some(EventType::Emigration),
+        "IMMI" => Some(EventType::Immigration),
+        "EVEN" => Some(EventType::Other("Event".to_string())),
+        _ => None,
+    }
 }
 
 fn parse_gedcom_name(val: &str) -> PersonName {
-    // Format: "Given /Surname/ Suffix"
-    let mut given = None;
-    let mut surname = None;
-
-    if let (Some(start), Some(end)) = (val.find('/'), val.rfind('/')) {
-        if start != end {
-            let s = val[start + 1..end].trim();
-            if !s.is_empty() {
-                surname = Some(s.to_string());
-            }
-            let g = val[..start].trim();
-            if !g.is_empty() {
-                given = Some(g.to_string());
-            }
+    // Format: "Given /Surname/ Suffix" or "Given Surname" or "/Surname/"
+    if val.contains('/') {
+        let slash1 = val.find('/').unwrap();
+        let slash2 = val.rfind('/').unwrap();
+        let surname = if slash2 > slash1 + 1 {
+            Some(val[slash1 + 1..slash2].trim().to_string())
+        } else {
+            None
         }
+        .filter(|s| !s.is_empty());
+
+        let given = val[..slash1].trim();
+        let given = if given.is_empty() { None } else { Some(given.to_string()) };
+
+        PersonName { given, surname, name_type: NameType::Birth, prefix: None, suffix: None }
     } else {
-        let trimmed = val.trim();
-        if !trimmed.is_empty() {
-            given = Some(trimmed.to_string());
+        let trimmed = val.trim().to_string();
+        if trimmed.is_empty() {
+            PersonName { given: None, surname: None, name_type: NameType::Birth, prefix: None, suffix: None }
+        } else {
+            PersonName { given: Some(trimmed), surname: None, name_type: NameType::Birth, prefix: None, suffix: None }
         }
-    }
-
-    PersonName {
-        given,
-        surname,
-        name_type: NameType::Birth,
-        prefix: None,
-        suffix: None,
     }
 }
 
-fn parse_source(lines: &[GedcomLine]) -> KinforgeResult<Source> {
-    let mut source = Source::new("Untitled Source");
+// ── Source parser ─────────────────────────────────────────────────────────────
 
-    for line in lines.iter().skip(1) {
+fn parse_source_record(rec: &GedcomRecord) -> KinforgeResult<Source> {
+    let mut source = Source::new("Untitled Source");
+    for line in &rec.lines {
         if line.level == 1 {
             match line.tag.as_str() {
                 "TITL" => {
-                    source.title = line.value.clone().unwrap_or_default();
+                    if let Some(ref v) = line.value {
+                        source.title = v.clone();
+                    }
                 }
                 "AUTH" => {
                     source.author = line.value.clone();
@@ -209,9 +382,78 @@ fn parse_source(lines: &[GedcomLine]) -> KinforgeResult<Source> {
                 "PUBL" => {
                     source.publication = line.value.clone();
                 }
+                "NOTE" => {
+                    source.notes = line.value.clone();
+                }
                 _ => {}
             }
         }
     }
     Ok(source)
+}
+
+// ── Family record parser ──────────────────────────────────────────────────────
+
+fn parse_family_record(
+    rec: &GedcomRecord,
+    person_map: &HashMap<String, PersonId>,
+) -> KinforgeResult<Vec<Relationship>> {
+    let mut husb: Option<PersonId> = None;
+    let mut wife: Option<PersonId> = None;
+    let mut children: Vec<PersonId> = Vec::new();
+    let mut rels: Vec<Relationship> = Vec::new();
+
+    for line in &rec.lines {
+        if line.level == 1 {
+            match line.tag.as_str() {
+                "HUSB" => {
+                    if let Some(xref) = extract_xref(line.value.as_deref()) {
+                        husb = person_map.get(&xref).cloned();
+                    }
+                }
+                "WIFE" => {
+                    if let Some(xref) = extract_xref(line.value.as_deref()) {
+                        wife = person_map.get(&xref).cloned();
+                    }
+                }
+                "CHIL" => {
+                    if let Some(xref) = extract_xref(line.value.as_deref()) {
+                        if let Some(cid) = person_map.get(&xref) {
+                            children.push(cid.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Spouse relationship
+    if let (Some(ref h), Some(ref w)) = (&husb, &wife) {
+        rels.push(Relationship::new(RelationshipType::Spouse, h.clone(), w.clone()));
+    }
+
+    // Parent→child relationships
+    let parents: Vec<&PersonId> = [husb.as_ref(), wife.as_ref()].into_iter().flatten().collect();
+    for child_id in &children {
+        for parent_id in &parents {
+            rels.push(Relationship::new(
+                RelationshipType::ParentChild,
+                (*parent_id).clone(),
+                child_id.clone(),
+            ));
+        }
+    }
+
+    Ok(rels)
+}
+
+/// Extract the xref string from a `@XREF@` value.
+fn extract_xref(val: Option<&str>) -> Option<String> {
+    let v = val?.trim();
+    if v.starts_with('@') && v.ends_with('@') && v.len() > 2 {
+        Some(v[1..v.len() - 1].to_string())
+    } else {
+        None
+    }
 }

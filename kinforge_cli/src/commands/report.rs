@@ -7,64 +7,60 @@ use kinforge_viz::ascii_family_tree;
 
 #[derive(Subcommand)]
 pub enum ReportCommands {
-    /// List all people (summary)
+    /// Database statistics
+    Stats,
+    /// List all people
     People,
-    /// Full individual report
-    Individual {
-        /// Person ID
-        id: String,
-    },
-    /// Ancestor report
+    /// Full individual summary
+    Individual { id: String },
+    /// Ancestor chart
     Ancestors {
-        /// Person ID
         id: String,
-        /// Number of generations (default: 4)
-        #[arg(long, default_value = "4")]
-        generations: u32,
+        #[arg(long, default_value = "4")] generations: u32,
     },
-    /// Descendant report
+    /// Descendant chart
     Descendants {
-        /// Person ID
         id: String,
-        /// Number of generations (default: 4)
-        #[arg(long, default_value = "4")]
-        generations: u32,
+        #[arg(long, default_value = "4")] generations: u32,
     },
-    /// ASCII family tree
+    /// ASCII family tree (descendants)
     Tree {
-        /// Person ID
         id: String,
-        /// Depth (default: 3)
-        #[arg(long, default_value = "3")]
-        depth: u32,
+        #[arg(long, default_value = "3")] depth: u32,
     },
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
     match cmd {
+        ReportCommands::Stats => {
+            let s = app.stats()?;
+            println!("Database statistics:");
+            println!("  People:        {}", s.people);
+            println!("  Events:        {}", s.events);
+            println!("  Relationships: {}", s.relationships);
+            println!("  Places:        {}", s.places);
+            println!("  Sources:       {}", s.sources);
+            println!("  Citations:     {}", s.citations);
+            println!("  Database:      {}", app.config.database_path.display());
+        }
         ReportCommands::People => {
-            let report = people_list_report(&app.db)?;
-            print!("{}", report);
+            print!("{}", people_list_report(&app.db)?);
         }
         ReportCommands::Individual { id } => {
             let pid = PersonId::from_str(&id)?;
-            let report = individual_report(&app.db, &pid)?;
-            print!("{}", report);
+            print!("{}", individual_report(&app.db, &pid)?);
         }
         ReportCommands::Ancestors { id, generations } => {
             let pid = PersonId::from_str(&id)?;
-            let report = ancestor_report(&app.db, &pid, generations)?;
-            print!("{}", report);
+            print!("{}", ancestor_report(&app.db, &pid, generations)?);
         }
         ReportCommands::Descendants { id, generations } => {
             let pid = PersonId::from_str(&id)?;
-            let report = descendant_report(&app.db, &pid, generations)?;
-            print!("{}", report);
+            print!("{}", descendant_report(&app.db, &pid, generations)?);
         }
         ReportCommands::Tree { id, depth } => {
             let pid = PersonId::from_str(&id)?;
-            let tree = ascii_family_tree(&app.db, &pid, depth)?;
-            print!("{}", tree);
+            print!("{}", ascii_family_tree(&app.db, &pid, depth)?);
         }
     }
     Ok(())
