@@ -192,7 +192,9 @@ fn children_of(
 ) -> Vec<String> {
     all_rels
         .iter()
-        .filter(|r| r.rel_type == RelationshipType::ParentChild && r.person1_id.as_str() == parent_id)
+        .filter(|r| {
+            r.rel_type == RelationshipType::ParentChild && r.person1_id.as_str() == parent_id
+        })
         .filter_map(|r| person_gid.get(&r.person2_id.as_str()).cloned())
         .collect()
 }

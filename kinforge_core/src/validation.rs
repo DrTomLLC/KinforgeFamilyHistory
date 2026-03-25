@@ -44,10 +44,11 @@ pub fn validate_source(source: &Source) -> KinforgeResult<()> {
         ));
     }
     if let Some(year) = source.year {
-        if !(1 ..= 2100).contains(&year) {
-            return Err(KinforgeError::Validation(
-                format!("Source year {} is implausible", year),
-            ));
+        if !(1..=2100).contains(&year) {
+            return Err(KinforgeError::Validation(format!(
+                "Source year {} is implausible",
+                year
+            )));
         }
     }
     Ok(())
@@ -62,16 +63,18 @@ pub fn validate_place(place: &Place) -> KinforgeResult<()> {
     }
     if let Some(lat) = place.latitude {
         if !(-90.0..=90.0).contains(&lat) {
-            return Err(KinforgeError::Validation(
-                format!("Latitude {} is out of range [-90, 90]", lat),
-            ));
+            return Err(KinforgeError::Validation(format!(
+                "Latitude {} is out of range [-90, 90]",
+                lat
+            )));
         }
     }
     if let Some(lon) = place.longitude {
         if !(-180.0..=180.0).contains(&lon) {
-            return Err(KinforgeError::Validation(
-                format!("Longitude {} is out of range [-180, 180]", lon),
-            ));
+            return Err(KinforgeError::Validation(format!(
+                "Longitude {} is out of range [-180, 180]",
+                lon
+            )));
         }
     }
     Ok(())

@@ -7,20 +7,28 @@ use kinforge_core::models::{CitationId, ConfidenceLevel, EventId, SourceId};
 pub enum CitationCommands {
     /// Add a citation linking a source to an event
     Add {
-        #[arg(long)] source: String,
-        #[arg(long)] event: String,
-        #[arg(long)] page: Option<String>,
-        #[arg(long, default_value = "secondary")] confidence: String,
-        #[arg(long)] notes: Option<String>,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        event: String,
+        #[arg(long)]
+        page: Option<String>,
+        #[arg(long, default_value = "secondary")]
+        confidence: String,
+        #[arg(long)]
+        notes: Option<String>,
     },
     /// List citations for an event
     List { event: String },
     /// Update a citation's page or confidence
     Update {
         id: String,
-        #[arg(long)] page: Option<String>,
-        #[arg(long)] confidence: Option<String>,
-        #[arg(long)] notes: Option<String>,
+        #[arg(long)]
+        page: Option<String>,
+        #[arg(long)]
+        confidence: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
     },
     /// Delete a citation
     Delete { id: String },
@@ -28,7 +36,13 @@ pub enum CitationCommands {
 
 pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
     match cmd {
-        CitationCommands::Add { source, event, page, confidence, notes } => {
+        CitationCommands::Add {
+            source,
+            event,
+            page,
+            confidence,
+            notes,
+        } => {
             let sid = SourceId::from_str(&source)?;
             let eid = EventId::from_str(&event)?;
             let conf: ConfidenceLevel = confidence.parse()?;
@@ -38,29 +52,44 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
 
         CitationCommands::List { event } => {
             let eid = EventId::from_str(&event)?;
-            let citations = app.db.list_citations_for_event(&eid)?;
+            let citations = app.list_citations_for_event(&eid)?;
             if citations.is_empty() {
                 println!("No citations for this event.");
             } else {
                 println!("{} citation(s):", citations.len());
                 for c in &citations {
-                    let src_title = app.db.get_source(&c.source_id)
+                    let src_title = app
+                        .get_source(&c.source_id)
                         .map(|s| s.title)
                         .unwrap_or_else(|_| "?".to_string());
-                    println!("  [{}] {} | {} | conf: {}",
-                        c.id, src_title,
+                    println!(
+                        "  [{}] {} | {} | conf: {}",
+                        c.id,
+                        src_title,
                         c.page.as_deref().unwrap_or("no page"),
-                        c.confidence);
+                        c.confidence
+                    );
                 }
             }
         }
 
-        CitationCommands::Update { id, page, confidence, notes } => {
+        CitationCommands::Update {
+            id,
+            page,
+            confidence,
+            notes,
+        } => {
             let cid = CitationId::from_str(&id)?;
-            let mut citation = app.db.get_citation(&cid)?;
-            if let Some(p) = page { citation.page = Some(p); }
-            if let Some(c) = confidence { citation.confidence = c.parse()?; }
-            if let Some(n) = notes { citation.notes = Some(n); }
+            let mut citation = app.get_citation(&cid)?;
+            if let Some(p) = page {
+                citation.page = Some(p);
+            }
+            if let Some(c) = confidence {
+                citation.confidence = c.parse()?;
+            }
+            if let Some(n) = notes {
+                citation.notes = Some(n);
+            }
             app.update_citation(citation)?;
             println!("Updated citation {}.", id);
         }

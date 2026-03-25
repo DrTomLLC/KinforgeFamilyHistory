@@ -41,8 +41,8 @@ impl Config {
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = toml::to_string_pretty(self)
-            .map_err(|e| KinforgeError::Config(e.to_string()))?;
+        let text =
+            toml::to_string_pretty(self).map_err(|e| KinforgeError::Config(e.to_string()))?;
         std::fs::write(path, text)?;
         Ok(())
     }
@@ -85,7 +85,10 @@ fn kinforge_data_dir() -> PathBuf {
         return PathBuf::from(xdg).join("kinforge");
     }
     if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home).join(".local").join("share").join("kinforge");
+        return PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("kinforge");
     }
     // Last resort: current directory
     PathBuf::from(".")
@@ -97,9 +100,12 @@ fn user_config_file() -> Option<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         return Some(PathBuf::from(xdg).join("kinforge").join("config.toml"));
     }
-    std::env::var("HOME")
-        .ok()
-        .map(|home| PathBuf::from(home).join(".config").join("kinforge").join("config.toml"))
+    std::env::var("HOME").ok().map(|home| {
+        PathBuf::from(home)
+            .join(".config")
+            .join("kinforge")
+            .join("config.toml")
+    })
 }
 
 #[cfg(test)]

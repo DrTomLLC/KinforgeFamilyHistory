@@ -6,15 +6,9 @@ use std::path::PathBuf;
 
 mod commands;
 use commands::{
-    citation::CitationCommands,
-    event::EventCommands,
-    export::ExportCommands,
-    import::ImportCommands,
-    person::PersonCommands,
-    place::PlaceCommands,
-    relationship::RelationshipCommands,
-    report::ReportCommands,
-    search::SearchCommands,
+    citation::CitationCommands, event::EventCommands, export::ExportCommands,
+    import::ImportCommands, person::PersonCommands, place::PlaceCommands,
+    relationship::RelationshipCommands, report::ReportCommands, search::SearchCommands,
     source::SourceCommands,
 };
 

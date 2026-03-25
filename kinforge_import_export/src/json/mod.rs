@@ -33,8 +33,8 @@ pub fn import_json<R: Read>(db: &Database, reader: &mut R) -> KinforgeResult<()>
     let mut content = String::new();
     reader.read_to_string(&mut content)?;
 
-    let export: KinforgeExport = serde_json::from_str(&content)
-        .map_err(|e| KinforgeError::ImportExport(e.to_string()))?;
+    let export: KinforgeExport =
+        serde_json::from_str(&content).map_err(|e| KinforgeError::ImportExport(e.to_string()))?;
 
     for place in &export.places {
         db.insert_place(place)?;
