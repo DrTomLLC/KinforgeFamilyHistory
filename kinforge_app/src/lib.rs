@@ -1,3 +1,4 @@
+use chrono::Local;
 use kinforge_config::Config;
 use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
 use kinforge_storage::{repository::DatabaseStats, Database};
@@ -159,13 +160,19 @@ impl Application {
         name: &str,
         latitude: Option<f64>,
         longitude: Option<f64>,
+        parent_id: Option<PlaceId>,
     ) -> KinforgeResult<Place> {
         let mut place = Place::new(name);
         place.latitude = latitude;
         place.longitude = longitude;
+        place.parent_id = parent_id;
         validation::validate_place(&place)?;
         self.db.insert_place(&place)?;
         Ok(place)
+    }
+
+    pub fn get_place(&self, id: &PlaceId) -> KinforgeResult<Place> {
+        self.db.get_place(id)
     }
 
     pub fn update_place(&self, place: Place) -> KinforgeResult<Place> {
@@ -200,6 +207,16 @@ impl Application {
 
     pub fn delete_relationship(&self, id: &RelationshipId) -> KinforgeResult<()> {
         self.db.delete_relationship(id)
+    }
+
+    pub fn get_relationship(&self, id: &RelationshipId) -> KinforgeResult<Relationship> {
+        self.db.get_relationship(id)
+    }
+
+    pub fn update_relationship(&self, rel: Relationship) -> KinforgeResult<Relationship> {
+        validation::validate_relationship(&rel)?;
+        self.db.update_relationship(&rel)?;
+        Ok(rel)
     }
 
     pub fn list_relationships_for_person(
@@ -276,6 +293,10 @@ impl Application {
         self.db.delete_citation(id)
     }
 
+    pub fn get_citation(&self, id: &CitationId) -> KinforgeResult<Citation> {
+        self.db.get_citation(id)
+    }
+
     pub fn list_citations_for_event(&self, event_id: &EventId) -> KinforgeResult<Vec<Citation>> {
         self.db.list_citations_for_event(event_id)
     }
@@ -292,20 +313,14 @@ fn create_backup(config: &Config) -> KinforgeResult<()> {
     let backup_dir = src.parent().unwrap_or(Path::new(".")).join("backups");
     std::fs::create_dir_all(&backup_dir)?;
 
-    // Timestamp-based name
-    let ts = {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    };
+    // Human-readable timestamp: YYYY-MM-DD_HH-MM-SS
+    let ts = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let stem = src
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("kinforge");
     let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("db");
-    let backup_path = backup_dir.join(format!("{}-{}.{}", stem, ts, ext));
+    let backup_path = backup_dir.join(format!("{}_{}.{}", stem, ts, ext));
 
     std::fs::copy(src, &backup_path)?;
 

@@ -265,7 +265,7 @@ fn citation_update_and_delete() {
 fn place_crud() {
     let a = app();
     let pl = a
-        .add_place("London, England", Some(51.5074), Some(-0.1278))
+        .add_place("London, England", Some(51.5074), Some(-0.1278), None)
         .unwrap();
     let mut fetched = a.db.get_place(&pl.id).unwrap();
     assert_eq!(fetched.name, "London, England");
@@ -280,7 +280,7 @@ fn place_crud() {
 #[test]
 fn place_invalid_coords_rejected() {
     let a = app();
-    let result = a.add_place("Bad Place", Some(200.0), None);
+    let result = a.add_place("Bad Place", Some(200.0), None, None);
     assert!(result.is_err());
 }
 
@@ -296,4 +296,134 @@ fn stats_accuracy() {
     assert_eq!(s.people, 1);
     assert_eq!(s.events, 1);
     assert_eq!(s.sources, 0);
+}
+
+// ── New feature tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn event_date_approximate() {
+    let a = app();
+    let p = a
+        .add_person(Some("Old"), Some("Timer"), Sex::Male, None)
+        .unwrap();
+    let date = EventDate::Approximate(NaiveDate::from_ymd_opt(1850, 1, 1).unwrap());
+    let e = a
+        .add_event(
+            p.id.clone(),
+            EventType::Birth,
+            Some(date.clone()),
+            None,
+            None,
+        )
+        .unwrap();
+    let fetched = a.get_event(&e.id).unwrap();
+    assert_eq!(fetched.date, Some(date));
+}
+
+#[test]
+fn event_date_between() {
+    let a = app();
+    let p = a
+        .add_person(Some("Range"), None, Sex::Unknown, None)
+        .unwrap();
+    let d1 = NaiveDate::from_ymd_opt(1880, 1, 1).unwrap();
+    let d2 = NaiveDate::from_ymd_opt(1885, 12, 31).unwrap();
+    let date = EventDate::Between(d1, d2);
+    let e = a
+        .add_event(
+            p.id.clone(),
+            EventType::Birth,
+            Some(date.clone()),
+            None,
+            None,
+        )
+        .unwrap();
+    let fetched = a.get_event(&e.id).unwrap();
+    assert_eq!(fetched.date, Some(date));
+}
+
+#[test]
+fn relationship_update_notes() {
+    let a = app();
+    let p1 = a
+        .add_person(Some("Alice"), None, Sex::Female, None)
+        .unwrap();
+    let p2 = a.add_person(Some("Bob"), None, Sex::Male, None).unwrap();
+    let rel = a
+        .add_relationship(RelationshipType::Spouse, p1.id.clone(), p2.id.clone(), None)
+        .unwrap();
+    let mut updated = a.get_relationship(&rel.id).unwrap();
+    updated.notes = Some("married 1910".to_string());
+    a.update_relationship(updated).unwrap();
+    let fetched = a.get_relationship(&rel.id).unwrap();
+    assert_eq!(fetched.notes, Some("married 1910".to_string()));
+}
+
+#[test]
+fn relationship_show() {
+    let a = app();
+    let p1 = a.add_person(Some("Parent"), None, Sex::Male, None).unwrap();
+    let p2 = a
+        .add_person(Some("Child"), None, Sex::Female, None)
+        .unwrap();
+    let rel = a
+        .add_relationship(
+            RelationshipType::ParentChild,
+            p1.id.clone(),
+            p2.id.clone(),
+            None,
+        )
+        .unwrap();
+    let fetched = a.get_relationship(&rel.id).unwrap();
+    assert_eq!(fetched.rel_type, RelationshipType::ParentChild);
+    assert_eq!(fetched.person1_id, p1.id);
+    assert_eq!(fetched.person2_id, p2.id);
+}
+
+#[test]
+fn place_parent_hierarchy() {
+    let a = app();
+    let county = a.add_place("Suffolk County", None, None, None).unwrap();
+    let town = a
+        .add_place("Boston", Some(42.36), Some(-71.06), Some(county.id.clone()))
+        .unwrap();
+    let fetched = a.get_place(&town.id).unwrap();
+    assert_eq!(fetched.parent_id, Some(county.id));
+}
+
+#[test]
+fn place_parent_shown_in_update() {
+    let a = app();
+    let state = a.add_place("Massachusetts", None, None, None).unwrap();
+    let mut town = a.add_place("Springfield", None, None, None).unwrap();
+    town.parent_id = Some(state.id.clone());
+    a.update_place(town.clone()).unwrap();
+    let fetched = a.get_place(&town.id).unwrap();
+    assert_eq!(fetched.parent_id, Some(state.id));
+}
+
+#[test]
+fn get_citation_roundtrip() {
+    let a = app();
+    let p = a
+        .add_person(Some("Cite"), Some("Me"), Sex::Male, None)
+        .unwrap();
+    let e = a
+        .add_event(p.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    let src = a
+        .add_source("Test Book", None, None, Some(1900), None, None)
+        .unwrap();
+    let cit = a
+        .add_citation(
+            src.id.clone(),
+            e.id.clone(),
+            Some("p.42"),
+            ConfidenceLevel::Primary,
+            None,
+        )
+        .unwrap();
+    let fetched = a.get_citation(&cit.id).unwrap();
+    assert_eq!(fetched.page, Some("p.42".to_string()));
+    assert_eq!(fetched.confidence, ConfidenceLevel::Primary);
 }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Subcommand;
 use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventId, EventType, PersonId};
@@ -11,9 +11,15 @@ pub enum EventCommands {
         person: String,
         #[arg(long)]
         event_type: String,
-        /// Exact date (YYYY-MM-DD)
+        /// Date in YYYY-MM-DD format
         #[arg(long)]
         date: Option<String>,
+        /// Date qualifier: exact (default), approximate, before, after, between
+        #[arg(long, default_value = "exact")]
+        qualifier: String,
+        /// Second date for 'between' qualifier (YYYY-MM-DD)
+        #[arg(long)]
+        date2: Option<String>,
         /// Optional place name
         #[arg(long)]
         place: Option<String>,
@@ -27,13 +33,62 @@ pub enum EventCommands {
     /// Update an event's date or notes
     Update {
         id: String,
+        /// Date in YYYY-MM-DD format
         #[arg(long)]
         date: Option<String>,
+        /// Date qualifier: exact (default), approximate, before, after, between
+        #[arg(long, default_value = "exact")]
+        qualifier: String,
+        /// Second date for 'between' qualifier (YYYY-MM-DD)
+        #[arg(long)]
+        date2: Option<String>,
         #[arg(long)]
         notes: Option<String>,
     },
     /// Delete an event
     Delete { id: String },
+}
+
+/// Parse a date string and qualifier into an EventDate.
+/// Accepts YYYY-MM-DD or YYYY (year only, interpreted as Jan 1).
+fn parse_event_date(date_str: &str, qualifier: &str, date2_str: Option<&str>) -> Result<EventDate> {
+    // Accept "YYYY" as shorthand for "YYYY-01-01"
+    let normalise = |s: &str| -> String {
+        if s.len() == 4 && s.chars().all(|c| c.is_ascii_digit()) {
+            format!("{}-01-01", s)
+        } else if s.len() == 7 && s.chars().nth(4) == Some('-') {
+            format!("{}-01", s)
+        } else {
+            s.to_string()
+        }
+    };
+
+    let d1 = normalise(date_str);
+    let event_date = match qualifier.to_lowercase().as_str() {
+        "exact" | "e" => EventDate::from_parts("exact", Some(&d1), None),
+        "approximate" | "abt" | "about" | "approx" => {
+            EventDate::from_parts("approximate", Some(&d1), None)
+        }
+        "before" | "bef" | "b" => EventDate::from_parts("before", Some(&d1), None),
+        "after" | "aft" | "a" => EventDate::from_parts("after", Some(&d1), None),
+        "between" | "bet" => {
+            let d2 = date2_str
+                .map(normalise)
+                .ok_or_else(|| anyhow::anyhow!("--date2 is required for 'between' qualifier"))?;
+            EventDate::from_parts("between", Some(&d1), Some(&d2))
+        }
+        other => bail!(
+            "Unknown date qualifier '{}'. Use: exact, approximate, before, after, between",
+            other
+        ),
+    };
+
+    event_date.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not parse date '{}'. Use YYYY, YYYY-MM, or YYYY-MM-DD format.",
+            date_str
+        )
+    })
 }
 
 pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
@@ -42,6 +97,8 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             person,
             event_type,
             date,
+            qualifier,
+            date2,
             place,
             notes,
         } => {
@@ -49,9 +106,11 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             let etype: EventType = event_type
                 .parse()
                 .unwrap_or(EventType::Other(event_type.clone()));
-            let event_date = date
-                .as_deref()
-                .and_then(|d| EventDate::from_parts("exact", Some(d), None));
+            let event_date = if let Some(ref d) = date {
+                Some(parse_event_date(d, &qualifier, date2.as_deref())?)
+            } else {
+                None
+            };
             let event =
                 app.add_event(pid, etype, event_date, place.as_deref(), notes.as_deref())?;
             println!("Added event: {} (ID: {})", event.event_type, event.id);
@@ -68,7 +127,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
                     let place_str = e
                         .place_id
                         .as_ref()
-                        .and_then(|pid| app.db.get_place(pid).ok())
+                        .and_then(|pid| app.get_place(pid).ok())
                         .map(|pl| format!(" @ {}", pl.name))
                         .unwrap_or_default();
                     println!(
@@ -76,7 +135,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
                         e.id,
                         e.event_type,
                         if date_str.is_empty() {
-                            "".to_string()
+                            String::new()
                         } else {
                             format!(": {}", date_str)
                         },
@@ -95,20 +154,21 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
                 println!("Date: {}", d);
             }
             if let Some(ref pid) = e.place_id {
-                if let Ok(pl) = app.db.get_place(pid) {
+                if let Ok(pl) = app.get_place(pid) {
                     println!("Place: {}", pl.name);
                 }
             }
             if let Some(ref n) = e.notes {
                 println!("Notes: {}", n);
             }
-            // Show citations
-            let citations = app.db.list_citations_for_event(&eid)?;
+            let citations = app.list_citations_for_event(&eid)?;
             if !citations.is_empty() {
                 println!("\nCitations ({}):", citations.len());
                 for c in &citations {
-                    let src = app.db.get_source(&c.source_id);
-                    let src_title = src.map(|s| s.title).unwrap_or_else(|_| "?".to_string());
+                    let src_title = app
+                        .get_source(&c.source_id)
+                        .map(|s| s.title)
+                        .unwrap_or_else(|_| "?".to_string());
                     println!(
                         "  [{}] {} | {} | conf: {}",
                         c.id,
@@ -120,11 +180,17 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             }
         }
 
-        EventCommands::Update { id, date, notes } => {
+        EventCommands::Update {
+            id,
+            date,
+            qualifier,
+            date2,
+            notes,
+        } => {
             let eid = EventId::from_str(&id)?;
             let mut event = app.get_event(&eid)?;
-            if let Some(d) = date {
-                event.date = EventDate::from_parts("exact", Some(&d), None);
+            if let Some(ref d) = date {
+                event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
             }
             if let Some(n) = notes {
                 event.notes = Some(n);

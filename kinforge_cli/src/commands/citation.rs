@@ -52,14 +52,13 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
 
         CitationCommands::List { event } => {
             let eid = EventId::from_str(&event)?;
-            let citations = app.db.list_citations_for_event(&eid)?;
+            let citations = app.list_citations_for_event(&eid)?;
             if citations.is_empty() {
                 println!("No citations for this event.");
             } else {
                 println!("{} citation(s):", citations.len());
                 for c in &citations {
                     let src_title = app
-                        .db
                         .get_source(&c.source_id)
                         .map(|s| s.title)
                         .unwrap_or_else(|_| "?".to_string());
@@ -81,7 +80,7 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
             notes,
         } => {
             let cid = CitationId::from_str(&id)?;
-            let mut citation = app.db.get_citation(&cid)?;
+            let mut citation = app.get_citation(&cid)?;
             if let Some(p) = page {
                 citation.page = Some(p);
             }

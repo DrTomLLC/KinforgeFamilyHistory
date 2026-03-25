@@ -17,8 +17,16 @@ pub enum RelationshipCommands {
         #[arg(long)]
         notes: Option<String>,
     },
+    /// Show a relationship's details
+    Show { id: String },
     /// List relationships for a person
     List { person: String },
+    /// Update a relationship's notes
+    Update {
+        id: String,
+        #[arg(long)]
+        notes: Option<String>,
+    },
     /// Delete a relationship
     Delete { id: String },
 }
@@ -38,6 +46,26 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
             println!("Added relationship: {} (ID: {})", rel.rel_type, rel.id);
         }
 
+        RelationshipCommands::Show { id } => {
+            let rid = RelationshipId::from_str(&id)?;
+            let rel = app.get_relationship(&rid)?;
+            let p1_name = app
+                .get_person(&rel.person1_id)
+                .map(|p| p.display_name())
+                .unwrap_or_else(|_| rel.person1_id.to_string());
+            let p2_name = app
+                .get_person(&rel.person2_id)
+                .map(|p| p.display_name())
+                .unwrap_or_else(|_| rel.person2_id.to_string());
+            println!("ID:      {}", rel.id);
+            println!("Type:    {}", rel.rel_type);
+            println!("Person1: {} ({})", p1_name, rel.person1_id);
+            println!("Person2: {} ({})", p2_name, rel.person2_id);
+            if let Some(ref n) = rel.notes {
+                println!("Notes:   {}", n);
+            }
+        }
+
         RelationshipCommands::List { person } => {
             let pid = PersonId::from_str(&person)?;
             let rels = app.list_relationships_for_person(&pid)?;
@@ -52,7 +80,6 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
                         &r.person1_id
                     };
                     let other_name = app
-                        .db
                         .get_person(other_id)
                         .map(|p| p.display_name())
                         .unwrap_or_else(|_| other_id.to_string());
@@ -67,9 +94,27 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
                             }
                         }
                     };
-                    println!("  [{}] {} {} ({})", r.id, role, other_name, other_id);
+                    let notes_str = r
+                        .notes
+                        .as_deref()
+                        .map(|n| format!(" [{n}]"))
+                        .unwrap_or_default();
+                    println!(
+                        "  [{}] {} {} ({}){}",
+                        r.id, role, other_name, other_id, notes_str
+                    );
                 }
             }
+        }
+
+        RelationshipCommands::Update { id, notes } => {
+            let rid = RelationshipId::from_str(&id)?;
+            let mut rel = app.get_relationship(&rid)?;
+            if let Some(n) = notes {
+                rel.notes = Some(n);
+            }
+            app.update_relationship(rel)?;
+            println!("Updated relationship {}.", id);
         }
 
         RelationshipCommands::Delete { id } => {

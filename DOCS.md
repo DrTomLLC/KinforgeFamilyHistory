@@ -1,7 +1,7 @@
 # Kinforge Family History — Project Documentation
 
-> **Last updated:** 2026-03-24
-> **Build status:** 43/43 tests passing · 0 clippy warnings · `cargo fmt` clean
+> **Last updated:** 2026-03-25
+> **Build status:** 50/50 tests passing · 0 clippy warnings · `cargo fmt` clean
 
 ---
 
@@ -41,21 +41,21 @@ Key design principles:
 | Area | Status | Tests |
 |------|--------|-------|
 | Core domain models (Person, Event, Place, Relationship, Source, Citation) | ✅ Complete | — |
-| Flexible genealogical dates (exact, approximate, before, after, between) | ✅ Complete | — |
+| Flexible genealogical dates (exact, approximate, before, after, between) | ✅ Complete | 2 tests |
 | SQLite storage with WAL mode and foreign-key constraints | ✅ Complete | 15 unit tests |
 | Automatic schema migrations (version-tracked, non-destructive) | ✅ Complete | — |
-| Full CRUD for all entity types | ✅ Complete | 17 integration tests |
+| Full CRUD for all entity types | ✅ Complete | 24 integration tests |
 | Cascade deletes (delete person → events and relationships deleted) | ✅ Complete | tested |
 | Validation layer (date ordering, coordinate bounds, self-relationships, etc.) | ✅ Complete | 5 unit tests |
-| Backup-on-open system (timestamped copies, configurable max count, auto-prune) | ✅ Complete | 2 unit tests |
+| Backup-on-open system (timestamped `YYYY-MM-DD_HH-MM-SS` copies, auto-prune) | ✅ Complete | 2 unit tests |
 | GEDCOM 5.5 export (INDI, FAM, SOUR records) | ✅ Complete | 4 integration tests |
 | GEDCOM 5.5 import (people, events, families, sources) | ✅ Complete | 4 integration tests |
 | JSON export and import (full round-trip) | ✅ Complete | — |
 | TOML configuration file with XDG-compliant paths | ✅ Complete | 2 unit tests |
 | CLI: person add/list/show/update/add-name/delete | ✅ Complete | — |
-| CLI: event add/list/show/update/delete | ✅ Complete | — |
-| CLI: relationship add/list/delete | ✅ Complete | — |
-| CLI: place add/list/show/update/delete | ✅ Complete | — |
+| CLI: event add/list/show/update/delete with all date qualifiers | ✅ Complete | — |
+| CLI: relationship add/show/list/update/delete | ✅ Complete | — |
+| CLI: place add/list/show/update/delete with parent hierarchy | ✅ Complete | — |
 | CLI: source add/list/show/update/delete | ✅ Complete | — |
 | CLI: citation add/list/update/delete | ✅ Complete | — |
 | CLI: report stats/people/individual/ancestors/descendants/tree | ✅ Complete | — |
@@ -65,12 +65,17 @@ Key design principles:
 | CLI: import gedcom/json | ✅ Complete | — |
 | CLI: config (show active paths and settings) | ✅ Complete | — |
 | ASCII family tree visualization | ✅ Complete | — |
-| Ancestor and descendant reports | ✅ Complete | — |
+| Ancestor report with Ahnentafel numbering | ✅ Complete | — |
+| Descendant report with birth years | ✅ Complete | — |
+| People list showing birth year | ✅ Complete | — |
+| Individual report with life dates summary | ✅ Complete | — |
+| Place parent hierarchy (town → county → state) | ✅ Complete | 2 tests |
+| Relationship notes editing | ✅ Complete | 1 test |
 | Query system (PersonQuery, EventQuery, SourceQuery) | ✅ Complete | — |
 | Plugin API skeleton | ✅ Skeleton present | — |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 43 tests passing, 0 failures, 0 clippy warnings**
+**Total: 50 tests passing, 0 failures, 0 clippy warnings**
 
 ---
 
@@ -82,16 +87,17 @@ For one person to use Kinforge productively right now:
 - [x] First run auto-creates the database directory and SQLite file
 - [x] Backup fires automatically on every start — no action needed
 - [x] Add people, events, relationships, places, sources, citations via CLI
-- [x] Run reports on individuals, ancestors, descendants
+- [x] Use flexible genealogical dates: exact, approximate, before, after, or between
+- [x] Link places in a hierarchy (e.g. town → county → state)
+- [x] Edit relationship notes after the fact
+- [x] Run reports on individuals, ancestors (with Ahnentafel numbers), descendants
 - [x] Export your data to GEDCOM (importable into Ancestry, FamilySearch, etc.)
 - [x] Import a GEDCOM from another program to seed your database
 - [x] Search your database by name, sex, or source title
 - [x] Override the database path via `--db` flag or `KINFORGE_DB` environment variable
 - [x] Configure backup limits via `~/.config/kinforge/config.toml`
 
-**Kinforge is usable today as a single-user CLI genealogy tool with backup protection.**
-
-The one thing to be aware of: there is no interactive editing yet (you cannot edit an existing name's spelling directly; you delete and re-add). That is a known limitation tracked in the roadmap.
+**Kinforge is fully usable today as a single-user CLI genealogy tool with backup protection.**
 
 ---
 
@@ -153,11 +159,20 @@ On first run, Kinforge automatically:
 kinforge person add --given "John" --surname "Smith" --sex male
 kinforge person add --given "Mary" --surname "Jones" --sex female
 
-# See who's in the database (IDs are UUIDs like a1b2c3d4-...)
+# List everyone (IDs shown are UUIDs)
 kinforge person list
 
-# Add a birth event (use the UUID shown in person list)
+# Add a birth event (exact date)
 kinforge event add --person <UUID> --event-type birth --date 1885-06-15 --place "Boston, MA"
+
+# Add a birth event with an approximate year (year-only is accepted)
+kinforge event add --person <UUID> --event-type birth --date 1850 --qualifier approximate
+
+# Add a birth event with a 'before' qualifier
+kinforge event add --person <UUID> --event-type birth --date 1900 --qualifier before
+
+# Add a birth event with a date range
+kinforge event add --person <UUID> --event-type birth --date 1880-01-01 --qualifier between --date2 1885-12-31
 
 # Add a source
 kinforge source add --title "1900 US Census" --author "US Census Bureau" --year 1900
@@ -165,16 +180,35 @@ kinforge source add --title "1900 US Census" --author "US Census Bureau" --year 
 # Link event to source
 kinforge citation add --source <SOURCE-UUID> --event <EVENT-UUID> --page "sheet 12" --confidence primary
 
+# Build a place hierarchy
+kinforge place add --name "Suffolk County"
+kinforge place add --name "Boston" --lat 42.3601 --lon -71.0589 --parent <COUNTY-UUID>
+
+# Add a parent-child relationship
+kinforge relationship add --person1 <PARENT-UUID> --rel-type parent-child --person2 <CHILD-UUID>
+
+# Add notes to a relationship after the fact
+kinforge relationship update <REL-UUID> --notes "married 14 June 1910, St. Mary's Church"
+
 # Show a full individual report
 kinforge report individual <UUID>
 
-# See statistics
+# Ancestor chart with Ahnentafel numbers
+kinforge report ancestors <UUID> --generations 5
+
+# Descendant chart with birth years
+kinforge report descendants <UUID>
+
+# ASCII family tree
+kinforge report tree <UUID> --depth 3
+
+# See database statistics
 kinforge report stats
 
-# Export to GEDCOM (for use in other software)
+# Export to GEDCOM
 kinforge export gedcom my_family.ged
 
-# Import a GEDCOM file
+# Import a GEDCOM
 kinforge import gedcom existing_family.ged
 ```
 
@@ -196,11 +230,11 @@ No backup is created if the database does not yet exist (first run).
 
 ```
 ~/.local/share/kinforge/
-├── kinforge.db              ← your live database
+├── kinforge.db                          ← your live database
 └── backups/
     ├── kinforge_2026-03-20_09-15-00.db
     ├── kinforge_2026-03-21_14-22-31.db
-    └── kinforge_2026-03-24_08-00-17.db
+    └── kinforge_2026-03-25_08-00-17.db
 ```
 
 On Windows the same structure is under `%APPDATA%\kinforge\`.
@@ -239,15 +273,11 @@ export KINFORGE_DB=/path/to/myproject.db
 kinforge person list
 ```
 
-This lets you keep separate databases for different research projects.
-
 ---
 
 ## Configuration Reference
 
 Default config file location: `~/.config/kinforge/config.toml` (Linux/macOS) or `%APPDATA%\kinforge\config.toml` (Windows).
-
-If the file does not exist, all defaults apply. The file is standard TOML.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -293,36 +323,54 @@ kinforge person delete <UUID>
 ### `event`
 
 ```
-kinforge event add --person <UUID> --event-type <TYPE> [--date <YYYY-MM-DD>] [--place <NAME>] [--notes <TEXT>]
+kinforge event add --person <UUID> --event-type <TYPE> [--date <DATE>] [--qualifier <QUAL>] [--date2 <DATE>] [--place <NAME>] [--notes <TEXT>]
 kinforge event list <PERSON-UUID>
 kinforge event show <UUID>
-kinforge event update <UUID> [--date <YYYY-MM-DD>] [--notes <TEXT>]
+kinforge event update <UUID> [--date <DATE>] [--qualifier <QUAL>] [--date2 <DATE>] [--notes <TEXT>]
 kinforge event delete <UUID>
 ```
 
-Event types: `birth`, `death`, `marriage`, `divorce`, `burial`, `baptism`, `residence`, `occupation`, `education`, `military`, `naturalization`, `census`, `emigration`, `immigration`, or any custom string.
+**Date formats accepted:** `YYYY-MM-DD`, `YYYY-MM` (expands to 1st of month), `YYYY` (expands to Jan 1)
+
+**Date qualifiers (`--qualifier`):**
+
+| Value | Meaning | Example |
+|-------|---------|---------|
+| `exact` (default) | Precise known date | `--date 1885-06-15` |
+| `approximate` / `abt` | Roughly this date | `--date 1850 --qualifier approximate` |
+| `before` / `bef` | Known to be before | `--date 1900 --qualifier before` |
+| `after` / `aft` | Known to be after | `--date 1865 --qualifier after` |
+| `between` / `bet` | Date range (requires `--date2`) | `--date 1880 --qualifier between --date2 1885` |
+
+**Event types:** `birth`, `death`, `marriage`, `divorce`, `burial`, `baptism`, `residence`, `occupation`, `education`, `military`, `naturalization`, `census`, `emigration`, `immigration`, or any custom string.
 
 ### `relationship`
 
 ```
-kinforge relationship add --person1 <UUID> --person2 <UUID> --rel-type <TYPE> [--notes <TEXT>]
-kinforge relationship list --person <UUID>
+kinforge relationship add --person1 <UUID> --rel-type <TYPE> --person2 <UUID> [--notes <TEXT>]
+kinforge relationship show <UUID>
+kinforge relationship list <PERSON-UUID>
+kinforge relationship update <UUID> [--notes <TEXT>]
 kinforge relationship delete <UUID>
 ```
 
-Relationship types: `spouse`, `parent-child`, `sibling`, `other`.
+Relationship types: `parent-child`, `spouse`, `sibling`.
+
+For `parent-child`: `--person1` is the **parent**, `--person2` is the **child**.
 
 ### `place`
 
 ```
-kinforge place add <NAME> [--lat <DECIMAL>] [--lon <DECIMAL>]
+kinforge place add --name <NAME> [--lat <DECIMAL>] [--lon <DECIMAL>] [--parent <UUID>]
 kinforge place list
 kinforge place show <UUID>
-kinforge place update <UUID> [--name <NAME>] [--lat <DECIMAL>] [--lon <DECIMAL>]
+kinforge place update <UUID> [--name <NAME>] [--lat <DECIMAL>] [--lon <DECIMAL>] [--parent <UUID>]
 kinforge place delete <UUID>
 ```
 
-Latitude must be −90..90; longitude must be −180..180. Validation rejects out-of-range values.
+Build hierarchies with `--parent`: add a county first, then add towns with `--parent <COUNTY-UUID>`. The `place show` and `place list` commands display the parent name.
+
+Latitude must be −90..90; longitude must be −180..180.
 
 ### `source`
 
@@ -351,10 +399,12 @@ Confidence levels: `unreliable`, `questionable`, `secondary`, `primary`, `direct
 kinforge report stats
 kinforge report people
 kinforge report individual <UUID>
-kinforge report ancestors <UUID> [--generations <N>]        # default: 4
-kinforge report descendants <UUID> [--generations <N>]     # default: 4
-kinforge report tree <UUID> [--depth <N>]                  # ASCII tree, default depth: 3
+kinforge report ancestors <UUID> [--generations <N>]     # Ahnentafel numbered, default: 4 gen
+kinforge report descendants <UUID> [--generations <N>]  # shows birth years, default: 4 gen
+kinforge report tree <UUID> [--depth <N>]               # ASCII tree, default depth: 3
 ```
+
+**Ahnentafel numbering** in ancestor report: subject = 1, father = 2, mother = 3, paternal grandfather = 4, paternal grandmother = 5, etc.
 
 ### `search`
 
@@ -363,16 +413,12 @@ kinforge search people <QUERY> [--sex <male|female|unknown>]
 kinforge search sources <QUERY> [--from-year <YEAR>] [--to-year <YEAR>]
 ```
 
-The `QUERY` string is matched case-insensitively against all name parts (people) or title/author (sources).
-
 ### `export`
 
 ```
 kinforge export gedcom <OUTPUT-FILE>
 kinforge export json <OUTPUT-FILE>
 ```
-
-GEDCOM exports INDI (individuals), FAM (families), and SOUR (sources) records. JSON export includes all entities.
 
 ### `import`
 
@@ -381,15 +427,13 @@ kinforge import gedcom <INPUT-FILE>
 kinforge import json <INPUT-FILE>
 ```
 
-Import is additive — existing records are not deleted. Importing a GEDCOM twice will create duplicates; use with care on a fresh database or after inspecting the file.
+Import is additive — existing records are not deleted.
 
 ### `config`
 
 ```
 kinforge config
 ```
-
-Prints the active database path, config file path, backup settings, and log level.
 
 ---
 
@@ -399,11 +443,9 @@ Prints the active database path, config file path, backup settings, and log leve
 
 Kinforge uses a `schema_version` table in the database. On every open, it checks the current schema version and applies any pending migrations in order. Migrations are append-only — they add new columns or tables but never drop existing data.
 
-If you upgrade to a newer version of Kinforge with a newer schema, your data is automatically migrated forward. Downgrading is not supported, but the backup system means you can always roll back.
-
 ### Backup guarantee
 
-With default settings (`backup_on_open = true`, `max_backups = 10`), you have up to 10 daily snapshots. As long as you run Kinforge at least once every 10 days, you always have a full history going back 10 runs. Increase `max_backups` if you want a longer history.
+With default settings (`backup_on_open = true`, `max_backups = 10`), you have up to 10 timestamped snapshots. As long as you run Kinforge at least once every 10 days, you always have a full history going back 10 runs. Increase `max_backups` for longer retention.
 
 ### Export as an additional safety net
 
@@ -411,7 +453,7 @@ Use `kinforge export json family.json` before any major import or batch operatio
 
 ### SQLite WAL mode
 
-The database runs in Write-Ahead Logging (WAL) mode for better concurrency and crash safety. In the unlikely event of a power loss mid-write, SQLite's WAL ensures the database remains consistent.
+The database runs in Write-Ahead Logging (WAL) mode for better concurrency and crash safety.
 
 ---
 
@@ -423,7 +465,7 @@ kinforge_storage       — SQLite persistence (rusqlite), schema migrations
 kinforge_config        — TOML config file, XDG path resolution
 kinforge_query         — in-memory query builder over storage
 kinforge_import_export — GEDCOM 5.5 parser/writer, JSON import/export
-kinforge_reports       — text report generators (individual, ancestors, etc.)
+kinforge_reports       — text report generators (individual, Ahnentafel ancestors, descendants)
 kinforge_viz           — ASCII tree renderer
 kinforge_app           — high-level Application facade (used by CLI and tests)
 kinforge_cli           — clap-based command-line interface (the binary)
@@ -432,46 +474,37 @@ kinforge_sync          — sync/replication skeleton (not yet implemented)
 kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 ```
 
-The CLI only depends on `kinforge_app`. Tests in `kinforge_app` use an in-memory SQLite database for speed and isolation.
-
 ---
 
 ## What Is Not Yet Implemented
 
-The following features are planned but not yet built:
-
-| Feature | Crate | Notes |
-|---------|-------|-------|
-| Desktop GUI | `kinforge_ui_desktop` | Skeleton only; no UI framework chosen |
-| Cloud/peer sync | `kinforge_sync` | Skeleton only; designed for future addition |
-| Plugin loading | `kinforge_plugin_api` | Trait defined; no loader or host yet |
-| In-place name editing | `kinforge_app` / CLI | Must delete and re-add name entries |
-| Place hierarchy (county → state → country) | `kinforge_core` | Parent field exists in DB; not exposed in CLI |
-| Relationship notes editing | CLI | Notes stored but not editable via CLI |
-| Duplicate detection on GEDCOM import | `kinforge_import_export` | Import is purely additive |
-| Interactive date entry (ABT, BEF, AFT, BET) via CLI | CLI | Only exact `YYYY-MM-DD` dates accepted in CLI |
-| Note editing for existing records | CLI | Notes can only be set on create or full update |
-| Media/document attachments | `kinforge_core` | Not in schema |
-| DNA match integration | — | Not planned in current scope |
+| Feature | Notes |
+|---------|-------|
+| Desktop GUI | `kinforge_ui_desktop` skeleton only; no UI framework chosen |
+| Cloud/peer sync | `kinforge_sync` skeleton only |
+| Plugin loading | Trait defined; no loader or host yet |
+| Duplicate detection on GEDCOM import | Import is purely additive |
+| In-place name editing | Delete and re-add name entries as workaround |
+| Media/document attachments | Not in schema |
+| Full-text notes search | Not yet implemented |
+| Interactive TUI | Not yet implemented |
 
 ---
 
 ## Roadmap
 
-**Near-term (next iteration):**
-- [ ] Expose place parent hierarchy in CLI (`place add --parent <UUID>`)
-- [ ] CLI support for all `EventDate` variants (`--date "ABT 1890"`, `--date "BEF 1900"`, `--date "BET 1880 AND 1885"`)
-- [ ] Relationship notes editing (`relationship update <UUID> --notes <TEXT>`)
+**Near-term:**
 - [ ] Duplicate detection / merge on GEDCOM import
-- [ ] `kinforge_app` public field `db` should be private (expose only via methods)
+- [ ] Additional report formats: Ahnentafel chart as printable table, family group sheet
+- [ ] In-place name editing (`person update-name <person-uuid> <name-index> --given X`)
+- [ ] Full-text notes search across all entities
 
 **Medium-term:**
 - [ ] Interactive TUI (terminal user interface) using `ratatui`
-- [ ] Additional report formats: Ahnentafel chart, family group sheet
-- [ ] Full-text notes search
 - [ ] Media attachment support (link filenames to records)
+- [ ] `kinforge_app::db` made fully private (all access through Application methods)
 
 **Long-term:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)
-- [ ] Optional sync between devices via a self-hosted server (`kinforge_sync`)
+- [ ] Optional sync between devices (`kinforge_sync`)
 - [ ] Plugin loading at runtime (`kinforge_plugin_api`)
