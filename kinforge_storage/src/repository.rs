@@ -788,6 +788,127 @@ impl Database {
         Ok(())
     }
 
+    // ── Full-text notes search ────────────────────────────────────────────────
+
+    /// Search notes across all entity types. Returns a list of human-readable
+    /// match descriptions: "(person) John Smith: <notes snippet>", etc.
+    pub fn search_notes(&self, query: &str) -> KinforgeResult<Vec<NoteMatch>> {
+        let pattern = format!("%{}%", query.to_lowercase());
+        let mut results = Vec::new();
+
+        // People
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, notes FROM people WHERE lower(notes) LIKE ?1 AND notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([&pattern], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (id_str, notes) in rows {
+            let pid = PersonId::from_str(&id_str).ok();
+            let name = pid
+                .as_ref()
+                .and_then(|p| self.get_person(p).ok())
+                .map(|p| p.display_name())
+                .unwrap_or_else(|| id_str.clone());
+            results.push(NoteMatch {
+                entity_type: "person".to_string(),
+                entity_id: id_str,
+                label: name,
+                notes,
+            });
+        }
+
+        // Events
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, event_type, notes FROM events WHERE lower(notes) LIKE ?1 AND notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([&pattern], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (id_str, etype, notes) in rows {
+            results.push(NoteMatch {
+                entity_type: "event".to_string(),
+                entity_id: id_str,
+                label: etype,
+                notes,
+            });
+        }
+
+        // Sources
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, title, notes FROM sources WHERE lower(notes) LIKE ?1 AND notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([&pattern], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (id_str, title, notes) in rows {
+            results.push(NoteMatch {
+                entity_type: "source".to_string(),
+                entity_id: id_str,
+                label: title,
+                notes,
+            });
+        }
+
+        // Relationships
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, rel_type, notes FROM relationships WHERE lower(notes) LIKE ?1 AND notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([&pattern], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (id_str, rtype, notes) in rows {
+            results.push(NoteMatch {
+                entity_type: "relationship".to_string(),
+                entity_id: id_str,
+                label: rtype,
+                notes,
+            });
+        }
+
+        Ok(results)
+    }
+
     // ── Statistics ────────────────────────────────────────────────────────────
 
     pub fn stats(&self) -> KinforgeResult<DatabaseStats> {
@@ -1005,6 +1126,19 @@ fn decompose_date(date: &Option<EventDate>) -> (Option<String>, Option<String>, 
         Some(d) => (Some(d.kind_str().to_string()), d.date_str(), d.date2_str()),
         None => (None, None, None),
     }
+}
+
+// ── Public types ──────────────────────────────────────────────────────────────
+
+/// A single match returned by [`Database::search_notes`].
+#[derive(Debug, Clone)]
+pub struct NoteMatch {
+    /// "person", "event", "source", or "relationship"
+    pub entity_type: String,
+    pub entity_id: String,
+    /// Human-readable label (person name, event type, source title, …)
+    pub label: String,
+    pub notes: String,
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────────

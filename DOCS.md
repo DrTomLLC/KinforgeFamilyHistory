@@ -1,7 +1,7 @@
 # Kinforge Family History — Project Documentation
 
-> **Last updated:** 2026-03-25
-> **Build status:** 50/50 tests passing · 0 clippy warnings · `cargo fmt` clean
+> **Last updated:** 2026-03-26
+> **Build status:** 57/57 tests passing · 0 clippy warnings · `cargo fmt` clean
 
 ---
 
@@ -59,23 +59,31 @@ Key design principles:
 | CLI: source add/list/show/update/delete | ✅ Complete | — |
 | CLI: citation add/list/update/delete | ✅ Complete | — |
 | CLI: report stats/people/individual/ancestors/descendants/tree | ✅ Complete | — |
+| CLI: report ahnentafel (printable numbered chart) | ✅ Complete | — |
+| CLI: report family-group (subject + parents + spouses + children) | ✅ Complete | — |
 | CLI: search people (by name, sex filter) | ✅ Complete | — |
 | CLI: search sources (by title, year range) | ✅ Complete | — |
+| CLI: search notes (full-text across people/events/sources/relationships) | ✅ Complete | 3 tests |
+| CLI: person update-name / remove-name | ✅ Complete | 1 test |
 | CLI: export gedcom/json | ✅ Complete | — |
 | CLI: import gedcom/json | ✅ Complete | — |
+| CLI: import gedcom with --on-duplicate skip/merge/add | ✅ Complete | 3 tests |
 | CLI: config (show active paths and settings) | ✅ Complete | — |
 | ASCII family tree visualization | ✅ Complete | — |
 | Ancestor report with Ahnentafel numbering | ✅ Complete | — |
+| Ahnentafel table (printable box-drawing chart) | ✅ Complete | — |
+| Family group sheet | ✅ Complete | — |
 | Descendant report with birth years | ✅ Complete | — |
 | People list showing birth year | ✅ Complete | — |
 | Individual report with life dates summary | ✅ Complete | — |
 | Place parent hierarchy (town → county → state) | ✅ Complete | 2 tests |
 | Relationship notes editing | ✅ Complete | 1 test |
 | Query system (PersonQuery, EventQuery, SourceQuery) | ✅ Complete | — |
+| **Desktop GUI** (egui/eframe — People, Sources, Reports, Import/Export, Settings) | ✅ Complete | — |
 | Plugin API skeleton | ✅ Skeleton present | — |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 50 tests passing, 0 failures, 0 clippy warnings**
+**Total: 57 tests passing, 0 failures, 0 clippy warnings**
 
 ---
 
@@ -97,7 +105,7 @@ For one person to use Kinforge productively right now:
 - [x] Override the database path via `--db` flag or `KINFORGE_DB` environment variable
 - [x] Configure backup limits via `~/.config/kinforge/config.toml`
 
-**Kinforge is fully usable today as a single-user CLI genealogy tool with backup protection.**
+**Kinforge is fully usable today as a single-user genealogy tool — via the desktop GUI or the command line — with automatic backup protection.**
 
 ---
 
@@ -317,6 +325,8 @@ kinforge person list
 kinforge person show <UUID>
 kinforge person update <UUID> [--sex <SEX>] [--notes <TEXT>]
 kinforge person add-name <UUID> [--given <NAME>] [--surname <NAME>] [--name-type <birth|married|aka|other>]
+kinforge person update-name <UUID> <INDEX> [--given <NAME>] [--surname <NAME>] [--name-type <TYPE>]
+kinforge person remove-name <UUID> <INDEX>
 kinforge person delete <UUID>
 ```
 
@@ -402,6 +412,8 @@ kinforge report individual <UUID>
 kinforge report ancestors <UUID> [--generations <N>]     # Ahnentafel numbered, default: 4 gen
 kinforge report descendants <UUID> [--generations <N>]  # shows birth years, default: 4 gen
 kinforge report tree <UUID> [--depth <N>]               # ASCII tree, default depth: 3
+kinforge report ahnentafel <UUID> [--generations <N>]   # Printable numbered ancestor table
+kinforge report family-group <UUID>                     # Family group sheet
 ```
 
 **Ahnentafel numbering** in ancestor report: subject = 1, father = 2, mother = 3, paternal grandfather = 4, paternal grandmother = 5, etc.
@@ -411,7 +423,10 @@ kinforge report tree <UUID> [--depth <N>]               # ASCII tree, default de
 ```
 kinforge search people <QUERY> [--sex <male|female|unknown>]
 kinforge search sources <QUERY> [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search notes <QUERY>
 ```
+
+`search notes` performs a full-text search across notes fields on people, events, sources, and relationships. Results show entity type, label, a short snippet, and the entity UUID.
 
 ### `export`
 
@@ -423,11 +438,15 @@ kinforge export json <OUTPUT-FILE>
 ### `import`
 
 ```
-kinforge import gedcom <INPUT-FILE>
+kinforge import gedcom <INPUT-FILE> [--on-duplicate <skip|merge|add>]
 kinforge import json <INPUT-FILE>
 ```
 
-Import is additive — existing records are not deleted.
+| `--on-duplicate` | Behaviour |
+|-----------------|-----------|
+| `skip` (default) | Skip any incoming person whose normalised name matches an existing person |
+| `merge` | Merge incoming events into the matched person (avoids duplicate events) |
+| `add` | Always insert, even if a duplicate name exists |
 
 ### `config`
 
@@ -467,11 +486,11 @@ kinforge_query         — in-memory query builder over storage
 kinforge_import_export — GEDCOM 5.5 parser/writer, JSON import/export
 kinforge_reports       — text report generators (individual, Ahnentafel ancestors, descendants)
 kinforge_viz           — ASCII tree renderer
-kinforge_app           — high-level Application facade (used by CLI and tests)
+kinforge_app           — high-level Application facade (used by CLI, GUI, and tests)
 kinforge_cli           — clap-based command-line interface (the binary)
+kinforge_ui_desktop    — egui/eframe desktop GUI (People, Sources, Reports, Import/Export)
 kinforge_plugin_api    — plugin trait skeleton (future extensibility)
 kinforge_sync          — sync/replication skeleton (not yet implemented)
-kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 ```
 
 ---
@@ -480,31 +499,42 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 
 | Feature | Notes |
 |---------|-------|
-| Desktop GUI | `kinforge_ui_desktop` skeleton only; no UI framework chosen |
 | Cloud/peer sync | `kinforge_sync` skeleton only |
 | Plugin loading | Trait defined; no loader or host yet |
-| Duplicate detection on GEDCOM import | Import is purely additive |
-| In-place name editing | Delete and re-add name entries as workaround |
 | Media/document attachments | Not in schema |
-| Full-text notes search | Not yet implemented |
-| Interactive TUI | Not yet implemented |
+| Interactive TUI | Deferred in favour of the desktop GUI |
+| `app.db` made private | All logic goes through Application methods; field still public |
+
+---
+
+## How to Launch the Desktop GUI
+
+```bash
+cargo build --release -p kinforge_ui_desktop
+./target/release/kinforge-desktop
+```
+
+On first launch, type the path to your database file (e.g. `kinforge.db`) and click **Open / Create Database**. The database is created if it does not exist.
+
+### GUI Features
+
+| Tab | What you can do |
+|-----|----------------|
+| **People** | Browse/search people list; add people; view name/sex/notes; add birth/death/marriage events; add parent-child, spouse, sibling relationships; delete person |
+| **Sources** | Browse/search sources; add sources with author, publication, year, repository |
+| **Reports** | Generate People List, Individual Report, Ahnentafel Table, Family Group Sheet, Descendants; copy output to clipboard; full-text notes search |
+| **Import / Export** | Import GEDCOM with Skip/Merge/Add duplicate handling; export GEDCOM to a file |
+| **Settings** | View current database path and backup settings; open backup folder |
 
 ---
 
 ## Roadmap
 
-**Near-term:**
-- [ ] Duplicate detection / merge on GEDCOM import
-- [ ] Additional report formats: Ahnentafel chart as printable table, family group sheet
-- [ ] In-place name editing (`person update-name <person-uuid> <name-index> --given X`)
-- [ ] Full-text notes search across all entities
-
 **Medium-term:**
-- [ ] Interactive TUI (terminal user interface) using `ratatui`
 - [ ] Media attachment support (link filenames to records)
 - [ ] `kinforge_app::db` made fully private (all access through Application methods)
+- [ ] JSON import/export in the GUI
 
 **Long-term:**
-- [ ] Desktop GUI (`kinforge_ui_desktop`)
 - [ ] Optional sync between devices (`kinforge_sync`)
 - [ ] Plugin loading at runtime (`kinforge_plugin_api`)

@@ -39,6 +39,24 @@ pub enum PersonCommands {
         #[arg(long, default_value = "birth")]
         name_type: String,
     },
+    /// Edit an existing name entry by index (0 = primary name)
+    UpdateName {
+        id: String,
+        /// Zero-based index of the name to edit (0 = primary/birth name)
+        index: usize,
+        #[arg(long)]
+        given: Option<String>,
+        #[arg(long)]
+        surname: Option<String>,
+        #[arg(long)]
+        name_type: Option<String>,
+    },
+    /// Remove a name entry by index (cannot remove the last name)
+    RemoveName {
+        id: String,
+        /// Zero-based index of the name to remove
+        index: usize,
+    },
     /// Delete a person (also deletes their events and relationships)
     Delete { id: String },
 }
@@ -110,6 +128,53 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 person.display_name(),
                 person.names.len()
             );
+        }
+
+        PersonCommands::UpdateName {
+            id,
+            index,
+            given,
+            surname,
+            name_type,
+        } => {
+            let pid = PersonId::from_str(&id)?;
+            let mut person = app.get_person(&pid)?;
+            if index >= person.names.len() {
+                anyhow::bail!(
+                    "Name index {} out of range — this person has {} name(s).",
+                    index,
+                    person.names.len()
+                );
+            }
+            if let Some(g) = given {
+                person.names[index].given = Some(g);
+            }
+            if let Some(s) = surname {
+                person.names[index].surname = Some(s);
+            }
+            if let Some(nt) = name_type {
+                person.names[index].name_type = nt.parse()?;
+            }
+            app.update_person(person)?;
+            println!("Updated name[{}] for person {}.", index, id);
+        }
+
+        PersonCommands::RemoveName { id, index } => {
+            let pid = PersonId::from_str(&id)?;
+            let mut person = app.get_person(&pid)?;
+            if person.names.len() <= 1 {
+                anyhow::bail!("Cannot remove the only name entry for a person.");
+            }
+            if index >= person.names.len() {
+                anyhow::bail!(
+                    "Name index {} out of range — this person has {} name(s).",
+                    index,
+                    person.names.len()
+                );
+            }
+            person.names.remove(index);
+            app.update_person(person)?;
+            println!("Removed name[{}] from person {}.", index, id);
         }
 
         PersonCommands::Delete { id } => {

@@ -19,6 +19,8 @@ pub enum SearchCommands {
         #[arg(long)]
         to_year: Option<i32>,
     },
+    /// Full-text search across notes on people, events, sources, and relationships
+    Notes { query: String },
 }
 
 pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
@@ -56,6 +58,26 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                 for s in &results {
                     let year = s.year.map(|y| format!(" ({})", y)).unwrap_or_default();
                     println!("  [{}] {}{}", s.id, s.title, year);
+                }
+            }
+        }
+
+        SearchCommands::Notes { query } => {
+            let results = app.search_notes(&query)?;
+            if results.is_empty() {
+                println!("No notes matching '{}'.", query);
+            } else {
+                println!("{} result(s):", results.len());
+                for m in &results {
+                    let snippet = if m.notes.len() > 80 {
+                        format!("{}…", &m.notes[..79])
+                    } else {
+                        m.notes.clone()
+                    };
+                    println!(
+                        "  [{}] {} \"{}\" -- {}",
+                        m.entity_type, m.label, snippet, m.entity_id
+                    );
                 }
             }
         }

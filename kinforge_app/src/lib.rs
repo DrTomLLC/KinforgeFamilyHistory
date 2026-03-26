@@ -1,7 +1,7 @@
 use chrono::Local;
 use kinforge_config::Config;
 use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
-use kinforge_storage::{repository::DatabaseStats, Database};
+use kinforge_storage::{repository::DatabaseStats, Database, NoteMatch};
 use std::path::Path;
 
 pub struct Application {
@@ -299,6 +299,12 @@ impl Application {
 
     pub fn list_citations_for_event(&self, event_id: &EventId) -> KinforgeResult<Vec<Citation>> {
         self.db.list_citations_for_event(event_id)
+    }
+
+    // ── Full-text search ───────────────────────────────────────────────────────
+
+    pub fn search_notes(&self, query: &str) -> KinforgeResult<Vec<NoteMatch>> {
+        self.db.search_notes(query)
     }
 }
 

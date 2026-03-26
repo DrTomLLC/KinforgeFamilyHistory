@@ -427,3 +427,119 @@ fn get_citation_roundtrip() {
     assert_eq!(fetched.page, Some("p.42".to_string()));
     assert_eq!(fetched.confidence, ConfidenceLevel::Primary);
 }
+
+// ── GEDCOM duplicate detection ────────────────────────────────────────────────
+
+#[test]
+fn gedcom_skip_duplicate() {
+    use kinforge_import_export::{import_gedcom, DuplicateHandling, ImportOptions};
+    let a = app();
+    // Pre-load a person
+    a.add_person(Some("John"), Some("Smith"), Sex::Male, None)
+        .unwrap();
+    let ged = "0 HEAD\n0 @I1@ INDI\n1 NAME John /Smith/\n1 SEX M\n0 TRLR\n";
+    let opts = ImportOptions {
+        on_duplicate: DuplicateHandling::Skip,
+    };
+    let stats = import_gedcom(ged, &a.db, &opts).unwrap();
+    assert_eq!(stats.skipped_duplicates, 1);
+    assert_eq!(stats.people, 0);
+    // Still only 1 person total
+    assert_eq!(a.list_people().unwrap().len(), 1);
+}
+
+#[test]
+fn gedcom_merge_duplicate_adds_events() {
+    use kinforge_import_export::{import_gedcom, DuplicateHandling, ImportOptions};
+    let a = app();
+    a.add_person(Some("Jane"), Some("Doe"), Sex::Female, None)
+        .unwrap();
+    let ged = "0 HEAD\n0 @I1@ INDI\n1 NAME Jane /Doe/\n1 SEX F\n1 BIRT\n2 DATE 1880\n0 TRLR\n";
+    let opts = ImportOptions {
+        on_duplicate: DuplicateHandling::Merge,
+    };
+    let stats = import_gedcom(ged, &a.db, &opts).unwrap();
+    assert_eq!(stats.merged_people, 1);
+    // Still 1 person, but now has a birth event
+    assert_eq!(a.list_people().unwrap().len(), 1);
+    assert_eq!(stats.events, 1);
+}
+
+#[test]
+fn gedcom_add_always_inserts() {
+    use kinforge_import_export::{import_gedcom, DuplicateHandling, ImportOptions};
+    let a = app();
+    a.add_person(Some("Bob"), Some("Jones"), Sex::Male, None)
+        .unwrap();
+    let ged = "0 HEAD\n0 @I1@ INDI\n1 NAME Bob /Jones/\n1 SEX M\n0 TRLR\n";
+    let opts = ImportOptions {
+        on_duplicate: DuplicateHandling::Add,
+    };
+    let stats = import_gedcom(ged, &a.db, &opts).unwrap();
+    assert_eq!(stats.people, 1);
+    assert_eq!(a.list_people().unwrap().len(), 2);
+}
+
+// ── Person name editing ───────────────────────────────────────────────────────
+
+#[test]
+fn update_name_in_place() {
+    let a = app();
+    let mut p = a
+        .add_person(Some("Willam"), Some("Brown"), Sex::Male, None)
+        .unwrap();
+    // Fix the typo
+    p.names[0].given = Some("William".to_string());
+    a.update_person(p.clone()).unwrap();
+    let fetched = a.get_person(&p.id).unwrap();
+    assert_eq!(fetched.names[0].given, Some("William".to_string()));
+}
+
+// ── Notes search ──────────────────────────────────────────────────────────────
+
+#[test]
+fn search_notes_finds_person() {
+    let a = app();
+    a.add_person(
+        Some("Test"),
+        Some("Person"),
+        Sex::Unknown,
+        Some("came to America in 1892"),
+    )
+    .unwrap();
+    let results = a.search_notes("america").unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0].entity_type, "person");
+    assert!(results[0].notes.to_lowercase().contains("america"));
+}
+
+#[test]
+fn search_notes_finds_source() {
+    let a = app();
+    a.add_source(
+        "Ellis Island Records",
+        None,
+        None,
+        None,
+        None,
+        Some("immigration records from New York"),
+    )
+    .unwrap();
+    let results = a.search_notes("immigration").unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0].entity_type, "source");
+}
+
+#[test]
+fn search_notes_empty_when_no_match() {
+    let a = app();
+    a.add_person(
+        Some("Nobody"),
+        None,
+        Sex::Unknown,
+        Some("no interesting notes"),
+    )
+    .unwrap();
+    let results = a.search_notes("xyzzy_no_match").unwrap();
+    assert!(results.is_empty());
+}

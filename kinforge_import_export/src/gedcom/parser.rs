@@ -3,12 +3,56 @@ use kinforge_core::{models::*, KinforgeError, KinforgeResult};
 use kinforge_storage::Database;
 use std::collections::HashMap;
 
+// ── Public options / stats ────────────────────────────────────────────────────
+
+/// How to handle a person that appears to already be in the database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DuplicateHandling {
+    /// Skip the incoming record and reuse the existing person's ID (default).
+    #[default]
+    Skip,
+    /// Merge: reuse the existing person's ID and add any new events.
+    Merge,
+    /// Always insert as a new record, even if a name match is found.
+    Add,
+}
+
+/// Options passed to [`import_gedcom`].
+#[derive(Debug, Clone, Default)]
+pub struct ImportOptions {
+    pub on_duplicate: DuplicateHandling,
+}
+
+/// Statistics returned after a GEDCOM import.
+#[derive(Debug, Default)]
+pub struct ImportStats {
+    pub people: usize,
+    pub events: usize,
+    pub sources: usize,
+    pub relationships: usize,
+    pub skipped_duplicates: usize,
+    pub merged_people: usize,
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Import a GEDCOM 5.5 file into the database.
-pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats> {
+pub fn import_gedcom(
+    content: &str,
+    db: &Database,
+    opts: &ImportOptions,
+) -> KinforgeResult<ImportStats> {
     let records = parse_top_level(content)?;
     let mut stats = ImportStats::default();
+
+    // Build a name→PersonId index of all people already in the DB.
+    let existing: Vec<Person> = db.list_people()?;
+    let mut existing_index: HashMap<String, PersonId> = HashMap::new();
+    for p in &existing {
+        if let Some(key) = primary_name_key(p) {
+            existing_index.insert(key, p.id.clone());
+        }
+    }
 
     // Map gedcom xref → internal ID for cross-references.
     let mut person_map: HashMap<String, PersonId> = HashMap::new();
@@ -18,17 +62,63 @@ pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats
     for rec in &records {
         if rec.tag == "INDI" {
             let (person, events) = parse_individual_record(rec)?;
+            let key = primary_name_key(&person);
+
+            let resolved_id = if opts.on_duplicate != DuplicateHandling::Add {
+                key.as_ref().and_then(|k| existing_index.get(k)).cloned()
+            } else {
+                None
+            };
+
+            if let Some(existing_id) = resolved_id {
+                // Duplicate found
+                match opts.on_duplicate {
+                    DuplicateHandling::Skip => {
+                        person_map.insert(rec.xref_id.clone(), existing_id);
+                        stats.skipped_duplicates += 1;
+                        continue;
+                    }
+                    DuplicateHandling::Merge => {
+                        // Add only events not already present for this person
+                        let existing_events = db.list_events_for_person(&existing_id)?;
+                        for mut pe in events {
+                            let already_present = existing_events.iter().any(|e| {
+                                e.event_type == pe.event.event_type && e.date == pe.event.date
+                            });
+                            if !already_present {
+                                pe.event.person_id = existing_id.clone();
+                                if let Some(ref place_name) = pe.pending_place {
+                                    let place = Place::new(place_name.clone());
+                                    db.insert_place(&place)?;
+                                    pe.event.place_id = Some(place.id);
+                                }
+                                db.insert_event(&pe.event)?;
+                                stats.events += 1;
+                            }
+                        }
+                        person_map.insert(rec.xref_id.clone(), existing_id);
+                        stats.merged_people += 1;
+                        continue;
+                    }
+                    DuplicateHandling::Add => unreachable!(),
+                }
+            }
+
+            // No duplicate — insert as new
             person_map.insert(rec.xref_id.clone(), person.id.clone());
+            if let Some(ref k) = key {
+                existing_index.insert(k.clone(), person.id.clone());
+            }
             db.insert_person(&person)?;
             stats.people += 1;
 
-            for mut event in events {
-                if let Some(ref place_name) = event.pending_place {
+            for mut pe in events {
+                if let Some(ref place_name) = pe.pending_place {
                     let place = Place::new(place_name.clone());
                     db.insert_place(&place)?;
-                    event.event.place_id = Some(place.id);
+                    pe.event.place_id = Some(place.id);
                 }
-                db.insert_event(&event.event)?;
+                db.insert_event(&pe.event)?;
                 stats.events += 1;
             }
         }
@@ -58,12 +148,13 @@ pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats
     Ok(stats)
 }
 
-#[derive(Debug, Default)]
-pub struct ImportStats {
-    pub people: usize,
-    pub events: usize,
-    pub sources: usize,
-    pub relationships: usize,
+/// Build a normalised lookup key from a person's primary name.
+fn primary_name_key(person: &Person) -> Option<String> {
+    person.names.first().map(|n| {
+        let given = n.given.as_deref().unwrap_or("").to_lowercase();
+        let surname = n.surname.as_deref().unwrap_or("").to_lowercase();
+        format!("{}|{}", given.trim(), surname.trim())
+    })
 }
 
 // ── GEDCOM record / line structures ──────────────────────────────────────────
