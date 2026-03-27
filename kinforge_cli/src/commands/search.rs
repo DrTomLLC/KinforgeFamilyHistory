@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
+use kinforge_core::models::{TaskPriority, TaskStatus};
 use kinforge_query::{EventQuery, PersonQuery, SourceQuery};
 
 #[derive(Subcommand)]
@@ -72,6 +73,21 @@ pub enum SearchCommands {
     Fulltext {
         /// Search query (FTS5 syntax: word, phrase "in quotes", prefix*, OR, NOT)
         query: String,
+    },
+    /// Search research tasks by description keyword, status, priority, or linked person
+    Tasks {
+        /// Match against any part of the task description (case-insensitive)
+        #[arg(long)]
+        query: Option<String>,
+        /// Filter by status: pending, in-progress, done
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by priority: low, medium, high
+        #[arg(long)]
+        priority: Option<String>,
+        /// Filter to tasks linked to a specific person (ID or prefix)
+        #[arg(long)]
+        person: Option<String>,
     },
 }
 
@@ -406,6 +422,73 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                 );
                 let snippet = truncate_notes(&r.snippet, 100);
                 println!("    {}", snippet.bright_black());
+            }
+        }
+
+        SearchCommands::Tasks { query, status, priority, person } => {
+            if query.is_none() && status.is_none() && priority.is_none() && person.is_none() {
+                println!(
+                    "{}",
+                    "Provide at least one filter: --query, --status, --priority, or --person.".yellow()
+                );
+                return Ok(());
+            }
+
+            let mut tasks = if let Some(ref p) = person {
+                let pid = app.resolve_person_id(p)?;
+                app.list_tasks_for_person(&pid)?
+            } else {
+                app.list_tasks()?
+            };
+
+            if let Some(ref s) = status {
+                let filter: TaskStatus = s.parse()?;
+                tasks.retain(|t| t.status == filter);
+            }
+            if let Some(ref p) = priority {
+                let filter: TaskPriority = p.parse()?;
+                tasks.retain(|t| t.priority == filter);
+            }
+            if let Some(ref q) = query {
+                let q_lower = q.to_lowercase();
+                tasks.retain(|t| t.description.to_lowercase().contains(&q_lower));
+            }
+
+            if tasks.is_empty() {
+                println!("{}", "No matching tasks.".bright_black());
+            } else {
+                println!(
+                    "{}\n",
+                    format!("  {} task(s)  ", tasks.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
+                for t in &tasks {
+                    let status_str = match t.status {
+                        TaskStatus::Pending => "[ ]".bright_black(),
+                        TaskStatus::InProgress => "[~]".yellow(),
+                        TaskStatus::Done => "[✓]".green(),
+                    };
+                    let prio_str = match t.priority {
+                        TaskPriority::High => "HIGH ".red().bold(),
+                        TaskPriority::Medium => "MED  ".yellow(),
+                        TaskPriority::Low => "LOW  ".bright_black(),
+                    };
+                    let person_str = t.person_id
+                        .as_ref()
+                        .and_then(|pid| app.get_person(pid).ok())
+                        .map(|p| format!("  ({})", p.display_name().bright_black()))
+                        .unwrap_or_default();
+                    println!(
+                        "  {} {} {} {}{}",
+                        status_str,
+                        prio_str,
+                        t.id.as_str()[..8].bright_black(),
+                        t.description.bold(),
+                        person_str
+                    );
+                }
             }
         }
     }

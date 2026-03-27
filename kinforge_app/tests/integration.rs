@@ -1359,3 +1359,74 @@ fn places_report_shows_no_events_for_uncited_place() {
     // The place should appear in the report with 0 events
     assert!(report.contains("Nowhere, USA"));
 }
+
+// ── Phase 20 tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn add_relationship_between_two_people() {
+    let a = app();
+    let p1 = a.add_person(Some("Alice"), Some("Smith"), Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("Bob"), Some("Smith"), Sex::Male, None).unwrap();
+    let rel = a.add_relationship(RelationshipType::Sibling, p1.id.clone(), p2.id.clone(), None).unwrap();
+    assert_eq!(rel.person1_id, p1.id);
+    assert_eq!(rel.person2_id, p2.id);
+    let rels = a.list_relationships_for_person(&p1.id).unwrap();
+    assert_eq!(rels.len(), 1);
+    assert!(matches!(rels[0].rel_type, RelationshipType::Sibling));
+}
+
+#[test]
+fn summary_report_shows_counts_and_surnames() {
+    use kinforge_reports::summary_report;
+    let a = app();
+    a.add_person(Some("Alice"), Some("Doe"), Sex::Female, None).unwrap();
+    a.add_person(Some("Bob"), Some("Doe"), Sex::Male, None).unwrap();
+    a.add_person(Some("Carol"), Some("Smith"), Sex::Female, None).unwrap();
+    let report = summary_report(a.database()).unwrap();
+    assert!(report.contains("People"));
+    assert!(report.contains("Doe"));
+    assert!(report.contains("Top Surnames"));
+}
+
+#[test]
+fn search_tasks_by_description_keyword() {
+    let a = app();
+    a.add_task("Find birth certificate", None, TaskPriority::High, None).unwrap();
+    a.add_task("Check census records", None, TaskPriority::Low, None).unwrap();
+    a.add_task("Verify marriage date", None, TaskPriority::Medium, None).unwrap();
+    let all = a.list_tasks().unwrap();
+    let matching: Vec<_> = all.iter()
+        .filter(|t| t.description.to_lowercase().contains("certificate"))
+        .collect();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].description, "Find birth certificate");
+}
+
+#[test]
+fn search_tasks_by_priority_filter() {
+    let a = app();
+    a.add_task("High priority task", None, TaskPriority::High, None).unwrap();
+    a.add_task("Low priority task", None, TaskPriority::Low, None).unwrap();
+    let all = a.list_tasks().unwrap();
+    let high: Vec<_> = all.iter().filter(|t| t.priority == TaskPriority::High).collect();
+    let low: Vec<_> = all.iter().filter(|t| t.priority == TaskPriority::Low).collect();
+    assert_eq!(high.len(), 1);
+    assert_eq!(low.len(), 1);
+    assert_eq!(high[0].description, "High priority task");
+}
+
+#[test]
+fn stats_avg_events_per_person() {
+    let a = app();
+    let p1 = a.add_person(Some("Jane"), Some("Doe"), Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("John"), Some("Doe"), Sex::Male, None).unwrap();
+    a.add_event(p1.id.clone(), EventType::Birth, None, None, None).unwrap();
+    a.add_event(p1.id.clone(), EventType::Death, None, None, None).unwrap();
+    a.add_event(p2.id.clone(), EventType::Birth, None, None, None).unwrap();
+    let s = a.stats().unwrap();
+    // 3 events for 2 people → avg 1.5
+    assert_eq!(s.people, 2);
+    assert_eq!(s.events, 3);
+    let avg = s.events as f64 / s.people as f64;
+    assert!((avg - 1.5).abs() < 0.001);
+}

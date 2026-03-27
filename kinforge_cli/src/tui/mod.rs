@@ -183,6 +183,14 @@ fn run(
                         }
                     }
 
+                    events::Action::CreateRelationship(pid1, rel_type_token, pid2) => {
+                        if let Ok(rt) = rel_type_token.parse::<RelationshipType>() {
+                            let _ = app.add_relationship(rt, pid1.clone(), pid2, None);
+                            state.detail_rel_rows =
+                                build_person_rel_rows(app, &pid1, &state.people);
+                        }
+                    }
+
                     events::Action::None => {}
                 }
             }

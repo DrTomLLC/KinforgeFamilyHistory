@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{InputMode, Tab, TaskRow, TaskStatusFilter, TuiState, TUI_EVENT_TYPES};
+use super::state::{InputMode, Tab, TaskRow, TaskStatusFilter, TuiState, TUI_EVENT_TYPES, TUI_REL_TYPES};
 use kinforge_core::models::{TaskPriority, TaskStatus};
 
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -85,6 +85,9 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     }
     if state.mode == InputMode::EventCreate {
         draw_event_create_popup(frame, state, area);
+    }
+    if state.mode == InputMode::RelationshipCreate {
+        draw_rel_create_popup(frame, state, area);
     }
 }
 
@@ -257,6 +260,54 @@ fn draw_event_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
             .borders(Borders::ALL)
             .title(" Add Event — Tab: switch · Enter: save · Esc: cancel ")
             .border_style(Style::default().fg(Color::Cyan)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_rel_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 60_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 6 };
+
+    let (rel_label, _) = TUI_REL_TYPES[state.rel_create_type_idx];
+    let rel_text = if state.rel_create_field == 1 {
+        format!("◄ {} ►", rel_label)
+    } else {
+        rel_label.to_string()
+    };
+
+    let cursor = "_";
+    let person2_text = if state.rel_create_field == 0 {
+        format!("{}{}", state.rel_create_person2_buf, cursor)
+    } else {
+        state.rel_create_person2_buf.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Type:    ", Style::default().fg(Color::Cyan)),
+            Span::styled(rel_text, if state.rel_create_field == 1 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("           Tab: switch  ←/→: cycle type", Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Person:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(person2_text, if state.rel_create_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("           (type name fragment — first match used)", Style::default().fg(Color::DarkGray))),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Add Relationship — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Magenta)),
     );
 
     frame.render_widget(Clear, popup_area);
@@ -818,6 +869,33 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
                     ),
                 ]));
             }
+            // Derived metrics
+            if s.people > 0 {
+                let avg = s.events as f64 / s.people as f64;
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("    {:<18}", "Avg events/person"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("{:.1}", avg),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            if s.events > 0 {
+                let pct = s.citations * 100 / s.events;
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("    {:<18}", "Citation coverage"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("{}%", pct),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
         }
         None => {
             lines.push(Line::from(Span::styled(
@@ -923,10 +1001,11 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::SourceCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::ConfirmDelete => " y: confirm delete  any other key: cancel".to_string(),
         InputMode::EventCreate => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
+        InputMode::RelationshipCreate => " Tab: switch field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
-                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  e: edit name  Tab: next  q: quit".to_string()
+                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  r: add rel  e: edit name  Tab: next  q: quit".to_string()
                 } else {
                     " Tab: next  ↑↓/jk  g/G  n: new  e: edit  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()

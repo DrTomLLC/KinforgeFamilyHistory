@@ -3,7 +3,7 @@ use kinforge_core::models::{PersonId, SourceId, TaskId};
 
 use super::state::{
     build_filtered_task_rows, first_task_item_idx, InputMode, Tab, TaskRow,
-    TuiState, TUI_EVENT_TYPES,
+    TuiState, TUI_EVENT_TYPES, TUI_REL_TYPES,
 };
 
 pub enum Action {
@@ -22,6 +22,7 @@ pub enum Action {
     CreateEvent(PersonId, String, String, String), // (person_id, type_name, date_str, place_str)
     DeleteSource(SourceId),
     EditTask(TaskId, String, kinforge_core::models::TaskPriority),
+    CreateRelationship(PersonId, String, PersonId), // (person1, rel_type_token, person2)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -45,6 +46,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::ConfirmDelete => handle_confirm_delete(state, key),
         InputMode::EventCreate => handle_event_create(state, key),
         InputMode::TaskEdit => handle_task_edit(state, key),
+        InputMode::RelationshipCreate => handle_rel_create(state, key),
     }
 }
 
@@ -285,6 +287,18 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
                 state.event_create_field = 0;
                 state.event_create_person_id = Some(pid);
                 state.mode = InputMode::EventCreate;
+            }
+            Action::None
+        }
+
+        // Add relationship: press 'r' in People tab when detail is open
+        KeyCode::Char('r') if state.active_tab == Tab::People && state.detail_open => {
+            if let Some(pid) = state.detail_person_id.clone() {
+                state.rel_create_person2_buf.clear();
+                state.rel_create_type_idx = 0;
+                state.rel_create_field = 0;
+                state.rel_create_person1_id = Some(pid);
+                state.mode = InputMode::RelationshipCreate;
             }
             Action::None
         }
@@ -693,4 +707,58 @@ fn move_task_down(state: &mut TuiState) {
         }
         i += 1;
     }
+}
+
+fn handle_rel_create(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.rel_create_person1_id = None;
+        }
+        KeyCode::Tab => {
+            state.rel_create_field = 1 - state.rel_create_field;
+        }
+        KeyCode::BackTab => {
+            state.rel_create_field = 1 - state.rel_create_field;
+        }
+        KeyCode::Left if state.rel_create_field == 1 => {
+            if state.rel_create_type_idx == 0 {
+                state.rel_create_type_idx = TUI_REL_TYPES.len() - 1;
+            } else {
+                state.rel_create_type_idx -= 1;
+            }
+        }
+        KeyCode::Right if state.rel_create_field == 1 => {
+            state.rel_create_type_idx = (state.rel_create_type_idx + 1) % TUI_REL_TYPES.len();
+        }
+        KeyCode::Enter => {
+            if let Some(pid1) = state.rel_create_person1_id.take() {
+                let query = state.rel_create_person2_buf.to_lowercase();
+                let pid2 = state.people.iter()
+                    .find(|p| p.display_name.to_lowercase().contains(&query) && p.id != pid1)
+                    .map(|p| p.id.clone());
+                if let Some(pid2) = pid2 {
+                    let (_, token) = TUI_REL_TYPES[state.rel_create_type_idx];
+                    let is_child_of = state.rel_create_type_idx == 1; // "Child of" flips order
+                    state.mode = InputMode::Normal;
+                    state.rel_create_person2_buf.clear();
+                    if is_child_of {
+                        // "Child of": person1 is child → pid2 is parent (person1)
+                        return Action::CreateRelationship(pid2, token.to_string(), pid1);
+                    } else {
+                        return Action::CreateRelationship(pid1, token.to_string(), pid2);
+                    }
+                }
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace if state.rel_create_field == 0 => {
+            state.rel_create_person2_buf.pop();
+        }
+        KeyCode::Char(c) if state.rel_create_field == 0 => {
+            state.rel_create_person2_buf.push(c);
+        }
+        _ => {}
+    }
+    Action::None
 }

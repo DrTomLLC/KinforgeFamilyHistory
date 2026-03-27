@@ -48,6 +48,16 @@ pub const TUI_EVENT_TYPES: &[&str] = &[
     "Emigration", "Immigration", "Naturalization", "Education",
 ];
 
+/// Relationship types (display label, parse token) for the TUI add-relationship popup.
+pub const TUI_REL_TYPES: &[(&str, &str)] = &[
+    ("Parent of", "parent"),
+    ("Child of", "parent"),   // will flip person order
+    ("Spouse", "spouse"),
+    ("Sibling", "sibling"),
+    ("Half-sibling", "halfsibling"),
+    ("Adoptive parent", "adoptive"),
+];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
@@ -59,6 +69,7 @@ pub enum InputMode {
     SourceCreate,
     ConfirmDelete,
     EventCreate,
+    RelationshipCreate,
 }
 
 // ── SortOrder ─────────────────────────────────────────────────────────────────
@@ -228,6 +239,12 @@ pub struct TuiState {
     pub event_create_place: String,
     pub event_create_field: u8,         // 0 = type, 1 = date, 2 = place
     pub event_create_person_id: Option<PersonId>,
+
+    // Inline relationship creation (from person detail panel)
+    pub rel_create_person2_buf: String, // name fragment to match against people list
+    pub rel_create_type_idx: usize,     // index into TUI_REL_TYPES
+    pub rel_create_field: u8,           // 0 = person2 name, 1 = rel type
+    pub rel_create_person1_id: Option<PersonId>,
 }
 
 impl TuiState {
@@ -328,6 +345,10 @@ impl TuiState {
             event_create_place: String::new(),
             event_create_field: 0,
             event_create_person_id: None,
+            rel_create_person2_buf: String::new(),
+            rel_create_type_idx: 0,
+            rel_create_field: 0,
+            rel_create_person1_id: None,
         })
     }
 

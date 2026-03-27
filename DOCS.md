@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-27
-> **Build status:** 103 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.5.0
+> **Build status:** 108 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.6.0
 
 ---
 
@@ -434,16 +434,18 @@ kinforge report narrative <ID>
 ### `search`
 
 ```
-kinforge search people [--name <FRAGMENT>] [--given <FRAGMENT>] [--surname <FRAGMENT>]
-                       [--sex <male|female|unknown>]
-                       [--birth-year-from <YEAR>] [--birth-year-to <YEAR>]
-kinforge search sources [--title <FRAGMENT>] [--author <FRAGMENT>]
-                        [--from-year <YEAR>] [--to-year <YEAR>]
-kinforge search events  [--place <FRAGMENT>] [--event-type <TYPE>]
-                        [--person <ID>] [--from-year <YEAR>] [--to-year <YEAR>]
-kinforge search notes   <QUERY>
+kinforge search people   [--name <FRAGMENT>] [--given <FRAGMENT>] [--surname <FRAGMENT>]
+                         [--sex <male|female|unknown>]
+                         [--birth-year-from <YEAR>] [--birth-year-to <YEAR>]
+kinforge search sources  [--title <FRAGMENT>] [--author <FRAGMENT>]
+                         [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search events   [--place <FRAGMENT>] [--event-type <TYPE>]
+                         [--person <ID>] [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search notes    <QUERY>
 kinforge search citations --source <TITLE_FRAGMENT>
-kinforge search fulltext <QUERY>
+kinforge search fulltext  <QUERY>
+kinforge search tasks    [--query <KEYWORD>] [--status <STATUS>]
+                         [--priority <PRIORITY>] [--person <ID>]
 ```
 
 ### `export`
@@ -537,6 +539,7 @@ Opens an interactive terminal UI with four tabs:
 | `e` | Tasks | Edit selected task description and priority (prefilled popup) |
 | `f` | Tasks | Cycle status filter (All → Pending → In Progress → Done → All) |
 | `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
+| `r` | People (detail open) | Open add-relationship popup (type ←/→, person name search) |
 | `x` | People | Open confirm-delete popup for selected person |
 | `x` | Sources | Open confirm-delete popup for selected source |
 | `s` | People | Toggle sort order (name ↔ birth year) |
@@ -652,6 +655,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `f` in Tasks tab — cycle status filter (All/Pending/InProgress/Done); title badge + (visible/total) count
 - [x] TUI: person detail panel shows place name alongside each event (parallel vec pattern)
 - [x] `kinforge search people --birth-year-from/--birth-year-to` — filter people by birth year range
+
+**v1.6.0 (Phase 20):**
+- [x] TUI: `r` in person detail panel — add-relationship popup (6 types via ←/→, person name search)
+- [x] TUI Stats: avg events/person and citation coverage % derived metrics
+- [x] `kinforge report summary` — compact overview: counts, completeness, top surnames + event types
+- [x] `kinforge search tasks` — search tasks by keyword, status, priority, linked person
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

@@ -1198,3 +1198,119 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
 }
+
+// ─── summary report ─────────────────────────────────────────────────────────
+
+/// One-page compact summary: counts, completeness metrics, top surnames, top event types.
+pub fn summary_report(db: &Database) -> KinforgeResult<String> {
+    let people = db.list_people()?;
+    let all_events = db.list_all_events()?;
+    let sources = db.list_sources()?;
+    let places = db.list_places()?;
+    let stats = db.stats()?;
+
+    let mut out = String::new();
+
+    // Header
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        "  Family History Summary  ".bold().bright_cyan().on_black(),
+        "─".repeat(30).bright_black()
+    ));
+
+    // Record counts
+    let rows: &[(&str, u64)] = &[
+        ("People", stats.people),
+        ("Events", stats.events),
+        ("Relationships", stats.relationships),
+        ("Places", stats.places),
+        ("Sources", stats.sources),
+        ("Citations", stats.citations),
+    ];
+    for (label, count) in rows {
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            label.cyan(),
+            count.to_string().bold().yellow()
+        ));
+    }
+
+    // Derived metrics
+    if stats.people > 0 {
+        let avg = stats.events as f64 / stats.people as f64;
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "Avg events / person".cyan(),
+            format!("{:.1}", avg).bold()
+        ));
+    }
+    if stats.events > 0 {
+        let pct = stats.citations * 100 / stats.events;
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "Citation coverage".cyan(),
+            format!("{}%", pct).bold()
+        ));
+    }
+    let _ = places;
+
+    // Top 5 surnames
+    let mut surname_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in &people {
+        if let Some(sn) = p.names.first().and_then(|n| n.surname.as_deref()) {
+            if !sn.is_empty() {
+                *surname_counts.entry(sn.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+    if !surname_counts.is_empty() {
+        out.push_str(&format!("\n{}\n", "Top Surnames:".bold().cyan()));
+        let mut surnames: Vec<(&String, &usize)> = surname_counts.iter().collect();
+        surnames.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (name, count) in surnames.iter().take(5) {
+            out.push_str(&format!(
+                "  {:>4}  {}\n",
+                count.to_string().yellow().bold(),
+                name.bold()
+            ));
+        }
+    }
+
+    // Top 5 event types
+    let mut type_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in &all_events {
+        *type_counts.entry(e.event_type.to_string()).or_insert(0) += 1;
+    }
+    if !type_counts.is_empty() {
+        out.push_str(&format!("\n{}\n", "Top Event Types:".bold().cyan()));
+        let mut types: Vec<(&String, &usize)> = type_counts.iter().collect();
+        types.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (etype, count) in types.iter().take(5) {
+            out.push_str(&format!(
+                "  {:>4}  {}\n",
+                count.to_string().yellow().bold(),
+                etype.bold()
+            ));
+        }
+    }
+
+    // Source overview
+    if !sources.is_empty() {
+        out.push_str(&format!(
+            "\n{} {}\n",
+            "Sources:".cyan().bold(),
+            format!("{} record(s)", sources.len()).bright_black()
+        ));
+        for s in sources.iter().take(5) {
+            out.push_str(&format!("  • {}\n", s.title.bold()));
+        }
+        if sources.len() > 5 {
+            out.push_str(&format!(
+                "  {} more…\n",
+                (sources.len() - 5).to_string().bright_black()
+            ));
+        }
+    }
+
+    Ok(out)
+}
