@@ -7,3 +7,5 @@ license.workspace = true
 [dependencies]
 kinforge_core = { workspace = true }
 kinforge_storage = { workspace = true }
+colored = { workspace = true }
+chrono = { workspace = true }

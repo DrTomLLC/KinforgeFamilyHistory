@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::SourceId;
 
 #[derive(Subcommand)]
 pub enum SourceCommands {
@@ -36,6 +36,8 @@ pub enum SourceCommands {
         #[arg(long)]
         year: Option<i32>,
         #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
         notes: Option<String>,
     },
     /// Delete a source
@@ -60,46 +62,100 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
                 repository.as_deref(),
                 notes.as_deref(),
             )?;
-            println!("Added source: {} (ID: {})", source.title, source.id);
+            println!(
+                "{} {} {}",
+                "Added:".green().bold(),
+                source.title.bold(),
+                format!("({})", source.id).bright_black()
+            );
         }
 
         SourceCommands::List => {
             let sources = app.list_sources()?;
             if sources.is_empty() {
-                println!("No sources in database.");
+                println!("{}", "No sources in database.".bright_black());
             } else {
-                println!("{} source(s):", sources.len());
+                println!(
+                    "{}\n",
+                    format!("  {} source(s)  ", sources.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
                 for s in &sources {
-                    let year_str = s.year.map(|y| format!(" ({})", y)).unwrap_or_default();
+                    let year_str = s
+                        .year
+                        .map(|y| format!(" {}", format!("({})", y).yellow()))
+                        .unwrap_or_default();
                     let author_str = s
                         .author
                         .as_deref()
-                        .map(|a| format!(", {}", a))
+                        .map(|a| format!(" {}", format!("— {}", a).bright_black()))
                         .unwrap_or_default();
-                    println!("  [{}] {}{}{}", s.id, s.title, year_str, author_str);
+                    println!(
+                        "  {} {}{}{}",
+                        s.id.to_string().bright_black(),
+                        s.title.bold(),
+                        year_str,
+                        author_str
+                    );
                 }
             }
         }
 
         SourceCommands::Show { id } => {
-            let sid = SourceId::from_str(&id)?;
+            let sid = app.resolve_source_id(&id)?;
             let s = app.get_source(&sid)?;
-            println!("ID:          {}", s.id);
-            println!("Title:       {}", s.title);
+            println!("{} {}", "ID:         ".cyan(), s.id.to_string().bright_black());
+            println!("{} {}", "Title:      ".cyan(), s.title.bold());
             if let Some(ref a) = s.author {
-                println!("Author:      {}", a);
+                println!("{} {}", "Author:     ".cyan(), a);
             }
             if let Some(ref p) = s.publication {
-                println!("Publication: {}", p);
+                println!("{} {}", "Publication:".cyan(), p);
             }
             if let Some(y) = s.year {
-                println!("Year:        {}", y);
+                println!("{} {}", "Year:       ".cyan(), y.to_string().yellow());
             }
             if let Some(ref r) = s.repository {
-                println!("Repository:  {}", r);
+                println!("{} {}", "Repository: ".cyan(), r);
             }
             if let Some(ref n) = s.notes {
-                println!("Notes:       {}", n);
+                println!("{} {}", "Notes:      ".cyan(), n);
+            }
+            let citations = app.list_citations_for_source(&sid)?;
+            if citations.is_empty() {
+                println!("{}", "\nNo citations reference this source.".bright_black());
+            } else {
+                println!(
+                    "\n{} {}",
+                    "Citations:  ".cyan(),
+                    citations.len().to_string().bold()
+                );
+                for c in &citations {
+                    let event_label = app
+                        .get_event(&c.event_id)
+                        .ok()
+                        .map(|e| {
+                            let name = app
+                                .get_person(&e.person_id)
+                                .map(|p| p.display_name())
+                                .unwrap_or_else(|_| e.person_id.to_string());
+                            format!("{} \u{2014} {}", name, e.event_type)
+                        })
+                        .unwrap_or_else(|| "?".to_string());
+                    let page = c
+                        .page
+                        .as_deref()
+                        .map(|p| format!(" p.{}", p))
+                        .unwrap_or_default();
+                    println!(
+                        "  {} {}{}",
+                        c.id.to_string().bright_black(),
+                        event_label.bold(),
+                        page.yellow()
+                    );
+                }
             }
         }
 
@@ -109,9 +165,10 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
             author,
             publication,
             year,
+            repository,
             notes,
         } => {
-            let sid = SourceId::from_str(&id)?;
+            let sid = app.resolve_source_id(&id)?;
             let mut source = app.get_source(&sid)?;
             if let Some(t) = title {
                 source.title = t;
@@ -125,17 +182,28 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
             if let Some(y) = year {
                 source.year = Some(y);
             }
+            if let Some(r) = repository {
+                source.repository = Some(r);
+            }
             if let Some(n) = notes {
                 source.notes = Some(n);
             }
             app.update_source(source)?;
-            println!("Updated source {}.", id);
+            println!(
+                "{} {}",
+                "Updated:".green().bold(),
+                id.bright_black()
+            );
         }
 
         SourceCommands::Delete { id } => {
-            let sid = SourceId::from_str(&id)?;
+            let sid = app.resolve_source_id(&id)?;
             app.delete_source(&sid)?;
-            println!("Deleted source {}.", id);
+            println!(
+                "{} {}",
+                "Deleted:".yellow().bold(),
+                id.bright_black()
+            );
         }
     }
     Ok(())

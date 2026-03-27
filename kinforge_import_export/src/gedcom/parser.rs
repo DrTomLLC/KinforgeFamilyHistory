@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use kinforge_core::{models::*, KinforgeError, KinforgeResult};
 use kinforge_storage::Database;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -14,10 +14,59 @@ pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats
     let mut person_map: HashMap<String, PersonId> = HashMap::new();
     let mut source_map: HashMap<String, SourceId> = HashMap::new();
 
+    // Build a fingerprint set from people already in the DB so we can skip duplicates.
+    // Fingerprint: lowercase(display_name) + birth_year (or "?")
+    let mut seen_fingerprints: HashSet<String> = db
+        .list_people()
+        .unwrap_or_default()
+        .iter()
+        .map(|p| {
+            let birth_year = db
+                .list_events_for_person(&p.id)
+                .ok()
+                .and_then(|evts| {
+                    evts.into_iter()
+                        .find(|e| matches!(e.event_type, EventType::Birth))
+                        .and_then(|e| e.date)
+                        .and_then(|d| match d {
+                            EventDate::Exact(nd) | EventDate::Approximate(nd) => {
+                                Some(nd.format("%Y").to_string())
+                            }
+                            _ => None,
+                        })
+                })
+                .unwrap_or_else(|| "?".to_string());
+            format!("{}|{}", p.display_name().to_lowercase(), birth_year)
+        })
+        .collect();
+
     // Pass 1: individuals
     for rec in &records {
         if rec.tag == "INDI" {
             let (person, events) = parse_individual_record(rec)?;
+
+            // Compute fingerprint for duplicate check
+            let birth_year = events
+                .iter()
+                .find(|pe| matches!(pe.event.event_type, EventType::Birth))
+                .and_then(|pe| pe.event.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => {
+                        Some(nd.format("%Y").to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "?".to_string());
+            let fp = format!("{}|{}", person.display_name().to_lowercase(), birth_year);
+
+            if seen_fingerprints.contains(&fp) {
+                stats.duplicates_skipped += 1;
+                // Still need a mapping so family records don't error — skip insertion only
+                person_map.insert(rec.xref_id.clone(), person.id.clone());
+                continue;
+            }
+            seen_fingerprints.insert(fp);
+
             person_map.insert(rec.xref_id.clone(), person.id.clone());
             db.insert_person(&person)?;
             stats.people += 1;
@@ -64,6 +113,7 @@ pub struct ImportStats {
     pub events: usize,
     pub sources: usize,
     pub relationships: usize,
+    pub duplicates_skipped: usize,
 }
 
 // ── GEDCOM record / line structures ──────────────────────────────────────────

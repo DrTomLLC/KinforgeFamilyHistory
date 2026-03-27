@@ -1,7 +1,9 @@
 use anyhow::{bail, Result};
 use clap::Subcommand;
+use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{EventDate, EventId, EventType, PersonId};
+use kinforge_core::models::{EventDate, EventType, Place, PlaceId};
+use kinforge_storage::Database;
 
 #[derive(Subcommand)]
 pub enum EventCommands {
@@ -30,9 +32,12 @@ pub enum EventCommands {
     List { person: String },
     /// Show a single event
     Show { id: String },
-    /// Update an event's date or notes
+    /// Update an event's type, date, place, or notes
     Update {
         id: String,
+        /// Change the event type (birth, death, marriage, etc.)
+        #[arg(long)]
+        event_type: Option<String>,
         /// Date in YYYY-MM-DD format
         #[arg(long)]
         date: Option<String>,
@@ -42,6 +47,12 @@ pub enum EventCommands {
         /// Second date for 'between' qualifier (YYYY-MM-DD)
         #[arg(long)]
         date2: Option<String>,
+        /// Remove the date entirely
+        #[arg(long)]
+        clear_date: bool,
+        /// Place name — searched first; created if not found
+        #[arg(long)]
+        place: Option<String>,
         #[arg(long)]
         notes: Option<String>,
     },
@@ -52,7 +63,6 @@ pub enum EventCommands {
 /// Parse a date string and qualifier into an EventDate.
 /// Accepts YYYY-MM-DD or YYYY (year only, interpreted as Jan 1).
 fn parse_event_date(date_str: &str, qualifier: &str, date2_str: Option<&str>) -> Result<EventDate> {
-    // Accept "YYYY" as shorthand for "YYYY-01-01"
     let normalise = |s: &str| -> String {
         if s.len() == 4 && s.chars().all(|c| c.is_ascii_digit()) {
             format!("{}-01-01", s)
@@ -102,7 +112,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             place,
             notes,
         } => {
-            let pid = PersonId::from_str(&person)?;
+            let pid = app.resolve_person_id(&person)?;
             let etype: EventType = event_type
                 .parse()
                 .unwrap_or(EventType::Other(event_type.clone()));
@@ -113,68 +123,80 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             };
             let event =
                 app.add_event(pid, etype, event_date, place.as_deref(), notes.as_deref())?;
-            println!("Added event: {} (ID: {})", event.event_type, event.id);
+            println!(
+                "{} {} {}",
+                "Added:".green().bold(),
+                event.event_type.to_string().bright_cyan(),
+                format!("({})", event.id).bright_black()
+            );
         }
 
         EventCommands::List { person } => {
-            let pid = PersonId::from_str(&person)?;
+            let pid = app.resolve_person_id(&person)?;
             let events = app.list_events_for_person(&pid)?;
             if events.is_empty() {
-                println!("No events for this person.");
+                println!("{}", "No events for this person.".bright_black());
             } else {
+                println!(
+                    "{}\n",
+                    format!("  {} event(s)  ", events.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
                 for e in &events {
                     let date_str = e.date.as_ref().map(|d| d.to_string()).unwrap_or_default();
                     let place_str = e
                         .place_id
                         .as_ref()
                         .and_then(|pid| app.get_place(pid).ok())
-                        .map(|pl| format!(" @ {}", pl.name))
+                        .map(|pl| format!(" @ {}", pl.name.green()))
                         .unwrap_or_default();
-                    println!(
-                        "  [{}] {}{}{}",
-                        e.id,
-                        e.event_type,
-                        if date_str.is_empty() {
-                            String::new()
-                        } else {
-                            format!(": {}", date_str)
-                        },
-                        place_str
+                    print!(
+                        "  {} {}",
+                        e.id.to_string().bright_black(),
+                        e.event_type.to_string().bright_cyan()
                     );
+                    if !date_str.is_empty() {
+                        print!(": {}", date_str.yellow());
+                    }
+                    println!("{}", place_str);
                 }
             }
         }
 
         EventCommands::Show { id } => {
-            let eid = EventId::from_str(&id)?;
+            let eid = app.resolve_event_id(&id)?;
             let e = app.get_event(&eid)?;
-            println!("ID:   {}", e.id);
-            println!("Type: {}", e.event_type);
+            println!("{} {}", "ID:   ".cyan(), e.id.to_string().bright_black());
+            println!("{} {}", "Type: ".cyan(), e.event_type.to_string().bright_cyan());
             if let Some(ref d) = e.date {
-                println!("Date: {}", d);
+                println!("{} {}", "Date: ".cyan(), d.to_string().yellow());
             }
             if let Some(ref pid) = e.place_id {
                 if let Ok(pl) = app.get_place(pid) {
-                    println!("Place: {}", pl.name);
+                    println!("{} {}", "Place:".cyan(), pl.name.green());
                 }
             }
             if let Some(ref n) = e.notes {
-                println!("Notes: {}", n);
+                println!("{} {}", "Notes:".cyan(), n);
             }
             let citations = app.list_citations_for_event(&eid)?;
             if !citations.is_empty() {
-                println!("\nCitations ({}):", citations.len());
+                println!("\n{}", format!("Citations ({}):", citations.len()).cyan().bold());
                 for c in &citations {
                     let src_title = app
                         .get_source(&c.source_id)
                         .map(|s| s.title)
                         .unwrap_or_else(|_| "?".to_string());
+                    let conf = format_confidence(&c.confidence);
                     println!(
-                        "  [{}] {} | {} | conf: {}",
-                        c.id,
-                        src_title,
-                        c.page.as_deref().unwrap_or("no page"),
-                        c.confidence
+                        "  {} {} {} {} {}",
+                        c.id.to_string().bright_black(),
+                        src_title.bold(),
+                        "|".bright_black(),
+                        c.page.as_deref().unwrap_or("no page").bright_black(),
+                        format!("conf: {}", conf)
                     );
                 }
             }
@@ -182,28 +204,74 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
 
         EventCommands::Update {
             id,
+            event_type,
             date,
             qualifier,
             date2,
+            clear_date,
+            place,
             notes,
         } => {
-            let eid = EventId::from_str(&id)?;
+            let eid = app.resolve_event_id(&id)?;
             let mut event = app.get_event(&eid)?;
-            if let Some(ref d) = date {
+            if let Some(ref et) = event_type {
+                event.event_type = et.parse().unwrap_or(EventType::Other(et.clone()));
+            }
+            if clear_date {
+                event.date = None;
+            } else if let Some(ref d) = date {
                 event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
+            }
+            if let Some(ref place_name) = place {
+                event.place_id = Some(find_or_create_place(&app.db, place_name)?);
             }
             if let Some(n) = notes {
                 event.notes = Some(n);
             }
             app.update_event(event)?;
-            println!("Updated event {}.", id);
+            println!(
+                "{} {}",
+                "Updated:".green().bold(),
+                id.bright_black()
+            );
         }
 
         EventCommands::Delete { id } => {
-            let eid = EventId::from_str(&id)?;
+            let eid = app.resolve_event_id(&id)?;
             app.delete_event(&eid)?;
-            println!("Deleted event {}.", id);
+            println!(
+                "{} {}",
+                "Deleted:".yellow().bold(),
+                id.bright_black()
+            );
         }
     }
     Ok(())
+}
+
+/// Look up a place by exact name (case-insensitive); create it if not found.
+fn find_or_create_place(db: &Database, name: &str) -> Result<PlaceId> {
+    let lower = name.to_lowercase();
+    if let Some(existing) = db
+        .list_places()?
+        .into_iter()
+        .find(|p| p.name.to_lowercase() == lower)
+    {
+        return Ok(existing.id);
+    }
+    let place = Place::new(name);
+    db.insert_place(&place)?;
+    Ok(place.id)
+}
+
+fn format_confidence(conf: &kinforge_core::models::ConfidenceLevel) -> String {
+    use kinforge_core::models::ConfidenceLevel;
+    let s = conf.to_string();
+    match conf {
+        ConfidenceLevel::Direct => s.bright_green().bold().to_string(),
+        ConfidenceLevel::Primary => s.green().to_string(),
+        ConfidenceLevel::Secondary => s.yellow().to_string(),
+        ConfidenceLevel::Questionable => s.red().to_string(),
+        ConfidenceLevel::Unreliable => s.bright_red().bold().to_string(),
+    }
 }

@@ -4,6 +4,28 @@ use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
 use kinforge_storage::{repository::DatabaseStats, Database};
 use std::path::Path;
 
+/// A single issue found during an integrity check.
+#[derive(Debug, Clone)]
+pub struct IntegrityIssue {
+    pub severity: &'static str, // "warning" or "error"
+    pub entity_type: String,
+    pub id: String,
+    pub message: String,
+}
+
+/// A single hit from a notes full-text search.
+#[derive(Debug, Clone)]
+pub struct NotesMatch {
+    /// "Person" or "Event"
+    pub kind: String,
+    /// UUID of the entity
+    pub id: String,
+    /// Human-readable label (person name, or "Name — EventType")
+    pub label: String,
+    /// The full notes text that matched
+    pub notes: String,
+}
+
 pub struct Application {
     pub db: Database,
     pub config: Config,
@@ -89,6 +111,102 @@ impl Application {
         Ok(person)
     }
 
+    /// Edit a name entry in-place by zero-based index.
+    ///
+    /// Only the supplied fields are changed; pass `None` to leave a field
+    /// unchanged.  Pass `Some(None)` to clear a given/surname field.
+    pub fn update_name_on_person(
+        &self,
+        person_id: &PersonId,
+        index: usize,
+        given: Option<Option<String>>,
+        surname: Option<Option<String>>,
+        name_type: Option<NameType>,
+    ) -> KinforgeResult<Person> {
+        let mut person = self.db.get_person(person_id)?;
+        let entry = person.names.get_mut(index).ok_or_else(|| {
+            KinforgeError::InvalidField {
+                field: "name index".to_string(),
+                value: index.to_string(),
+            }
+        })?;
+        if let Some(g) = given {
+            entry.given = g;
+        }
+        if let Some(s) = surname {
+            entry.surname = s;
+        }
+        if let Some(nt) = name_type {
+            entry.name_type = nt;
+        }
+        validation::validate_person(&person)?;
+        self.db.update_person(&person)?;
+        Ok(person)
+    }
+
+    /// Remove a name entry by zero-based index.
+    ///
+    /// The primary name (index 0) can only be removed if there is at least
+    /// one other name remaining.
+    pub fn delete_name_from_person(
+        &self,
+        person_id: &PersonId,
+        index: usize,
+    ) -> KinforgeResult<Person> {
+        let mut person = self.db.get_person(person_id)?;
+        if person.names.len() <= 1 && index == 0 {
+            return Err(KinforgeError::InvalidField {
+                field: "name index".to_string(),
+                value: "cannot delete the only name; delete the person instead".to_string(),
+            });
+        }
+        if index >= person.names.len() {
+            return Err(KinforgeError::InvalidField {
+                field: "name index".to_string(),
+                value: format!("{} (person has {} name(s))", index, person.names.len()),
+            });
+        }
+        person.names.remove(index);
+        self.db.update_person(&person)?;
+        Ok(person)
+    }
+
+    /// Search person notes and event notes for `query` (case-insensitive).
+    ///
+    /// Returns a flat list of `(entity_kind, display_label, notes_text)`.
+    pub fn search_notes(&self, query: &str) -> KinforgeResult<Vec<NotesMatch>> {
+        let q = query.to_lowercase();
+        let mut results = Vec::new();
+
+        for person in self.db.list_people()? {
+            if let Some(ref notes) = person.notes {
+                if notes.to_lowercase().contains(&q) {
+                    results.push(NotesMatch {
+                        kind: "Person".to_string(),
+                        id: person.id.to_string(),
+                        label: person.display_name(),
+                        notes: notes.clone(),
+                    });
+                }
+            }
+            // Also search event notes for this person
+            for event in self.db.list_events_for_person(&person.id)? {
+                if let Some(ref notes) = event.notes {
+                    if notes.to_lowercase().contains(&q) {
+                        results.push(NotesMatch {
+                            kind: "Event".to_string(),
+                            id: event.id.to_string(),
+                            label: format!("{} — {}", person.display_name(), event.event_type),
+                            notes: notes.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     pub fn update_person(&self, person: Person) -> KinforgeResult<Person> {
         validation::validate_person(&person)?;
         self.db.update_person(&person)?;
@@ -105,6 +223,288 @@ impl Application {
 
     pub fn delete_person(&self, id: &PersonId) -> KinforgeResult<()> {
         self.db.delete_person(id)
+    }
+
+    // ── ID resolution (full UUID or unambiguous prefix) ────────────────────
+
+    /// Resolve a person ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_person_id(&self, input: &str) -> KinforgeResult<PersonId> {
+        if let Ok(pid) = PersonId::from_str(input) {
+            return Ok(pid);
+        }
+        self.db.find_person_by_id_prefix(input).map(|p| p.id)
+    }
+
+    /// Resolve an event ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_event_id(&self, input: &str) -> KinforgeResult<EventId> {
+        if let Ok(eid) = EventId::from_str(input) {
+            return Ok(eid);
+        }
+        self.db.find_event_by_id_prefix(input).map(|e| e.id)
+    }
+
+    /// Resolve a place ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_place_id(&self, input: &str) -> KinforgeResult<PlaceId> {
+        if let Ok(pid) = PlaceId::from_str(input) {
+            return Ok(pid);
+        }
+        self.db.find_place_by_id_prefix(input).map(|p| p.id)
+    }
+
+    /// Resolve a relationship ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_relationship_id(&self, input: &str) -> KinforgeResult<RelationshipId> {
+        if let Ok(rid) = RelationshipId::from_str(input) {
+            return Ok(rid);
+        }
+        self.db
+            .find_relationship_by_id_prefix(input)
+            .map(|r| r.id)
+    }
+
+    /// Resolve a source ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_source_id(&self, input: &str) -> KinforgeResult<SourceId> {
+        if let Ok(sid) = SourceId::from_str(input) {
+            return Ok(sid);
+        }
+        self.db.find_source_by_id_prefix(input).map(|s| s.id)
+    }
+
+    /// Resolve a citation ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_citation_id(&self, input: &str) -> KinforgeResult<CitationId> {
+        if let Ok(cid) = CitationId::from_str(input) {
+            return Ok(cid);
+        }
+        self.db.find_citation_by_id_prefix(input).map(|c| c.id)
+    }
+
+    // ── Convenience family-link methods ───────────────────────────────────
+
+    /// Record that `parent_id` is a parent of `child_id`.
+    pub fn add_parent(
+        &self,
+        child_id: PersonId,
+        parent_id: PersonId,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Relationship> {
+        self.add_relationship(RelationshipType::ParentChild, parent_id, child_id, notes)
+    }
+
+    /// Record that `child_id` is a child of `parent_id`.
+    pub fn add_child(
+        &self,
+        parent_id: PersonId,
+        child_id: PersonId,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Relationship> {
+        self.add_relationship(RelationshipType::ParentChild, parent_id, child_id, notes)
+    }
+
+    /// Record a spouse relationship between two people.
+    pub fn add_spouse(
+        &self,
+        person1_id: PersonId,
+        person2_id: PersonId,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Relationship> {
+        self.add_relationship(RelationshipType::Spouse, person1_id, person2_id, notes)
+    }
+
+    /// Merge `source_id` into `target_id`.
+    ///
+    /// All names unique to source are appended to target.  All events and
+    /// relationships belonging to source are reassigned to target.  The source
+    /// person record is then deleted.  Returns the updated target person.
+    pub fn merge_person(
+        &self,
+        source_id: &PersonId,
+        target_id: &PersonId,
+    ) -> KinforgeResult<Person> {
+        if source_id == target_id {
+            return Err(KinforgeError::Validation(
+                "cannot merge a person with themselves".to_string(),
+            ));
+        }
+
+        let source = self.db.get_person(source_id)?;
+        let mut target = self.db.get_person(target_id)?;
+
+        // Copy unique names (match on given + surname).
+        for name in &source.names {
+            let already = target.names.iter().any(|n| {
+                n.given.as_deref() == name.given.as_deref()
+                    && n.surname.as_deref() == name.surname.as_deref()
+            });
+            if !already {
+                target.names.push(name.clone());
+            }
+        }
+
+        // Merge notes: append source notes to target if not already present.
+        match (&target.notes, &source.notes) {
+            (None, Some(sn)) => target.notes = Some(sn.clone()),
+            (Some(tn), Some(sn)) if !tn.contains(sn.as_str()) => {
+                target.notes = Some(format!("{}\n{}", tn, sn));
+            }
+            _ => {}
+        }
+
+        self.db.update_person(&target)?;
+
+        // Reassign events and relationships before deleting source.
+        self.db.reassign_events_to_person(source_id, target_id)?;
+        self.db
+            .reassign_relationships_to_person(source_id, target_id)?;
+
+        // Delete source person (cascade removes their person_names only; events/rels moved).
+        self.db.delete_person(source_id)?;
+
+        self.db.get_person(target_id)
+    }
+
+    // ── Data integrity check ───────────────────────────────────────────────
+
+    /// Run a sweep of the database looking for common data quality problems.
+    pub fn check_integrity(&self) -> KinforgeResult<Vec<IntegrityIssue>> {
+        let mut issues: Vec<IntegrityIssue> = Vec::new();
+
+        // People with no names
+        for person in self.db.list_people()? {
+            if person.names.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "error",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: "has no names".to_string(),
+                });
+            } else if person.display_name() == "(unnamed)" {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: "primary name has no given or surname".to_string(),
+                });
+            }
+
+            // People with no events at all
+            let events = self.db.list_events_for_person(&person.id)?;
+            if events.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: format!(
+                        "{} has no events (no birth, death, or any other event)",
+                        person.display_name()
+                    ),
+                });
+            }
+
+            // Events with no date
+            for event in &events {
+                if event.date.is_none() {
+                    issues.push(IntegrityIssue {
+                        severity: "warning",
+                        entity_type: "Event".to_string(),
+                        id: event.id.to_string(),
+                        message: format!(
+                            "{} event for {} has no date",
+                            event.event_type,
+                            person.display_name()
+                        ),
+                    });
+                }
+            }
+
+            // People with no relationships
+            let rels = self.db.list_relationships_for_person(&person.id)?;
+            if rels.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: format!(
+                        "{} has no relationships (not linked to any parent, child, or spouse)",
+                        person.display_name()
+                    ),
+                });
+            }
+
+            // Birth date after death date
+            let birth_date = events
+                .iter()
+                .find(|e| matches!(e.event_type, EventType::Birth))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(*nd),
+                    _ => None,
+                });
+            let death_date = events
+                .iter()
+                .find(|e| matches!(e.event_type, EventType::Death))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(*nd),
+                    _ => None,
+                });
+            if let (Some(b), Some(d)) = (birth_date, death_date) {
+                if b > d {
+                    issues.push(IntegrityIssue {
+                        severity: "error",
+                        entity_type: "Person".to_string(),
+                        id: person.id.to_string(),
+                        message: format!(
+                            "{} has birth date ({}) after death date ({})",
+                            person.display_name(),
+                            b.format("%Y-%m-%d"),
+                            d.format("%Y-%m-%d")
+                        ),
+                    });
+                }
+            }
+
+            // Duplicate events (same type on same person)
+            let mut seen_types: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for event in &events {
+                let key = event.event_type.to_string();
+                // Only flag duplicates for singleton event types
+                let singleton = matches!(
+                    event.event_type,
+                    EventType::Birth | EventType::Death | EventType::Burial | EventType::Baptism
+                );
+                if singleton && !seen_types.insert(key.clone()) {
+                    issues.push(IntegrityIssue {
+                        severity: "warning",
+                        entity_type: "Event".to_string(),
+                        id: event.id.to_string(),
+                        message: format!(
+                            "duplicate {} event for {} (multiple {} events recorded)",
+                            key,
+                            person.display_name(),
+                            key
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Orphan sources: sources with zero citations
+        for source in self.db.list_sources()? {
+            let citations = self.db.list_citations_for_source(&source.id)?;
+            if citations.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Source".to_string(),
+                    id: source.id.to_string(),
+                    message: format!(
+                        "'{}' has no citations — not referenced by any event",
+                        source.title
+                    ),
+                });
+            }
+        }
+
+        Ok(issues)
     }
 
     // ── Events ─────────────────────────────────────────────────────────────
@@ -299,6 +699,17 @@ impl Application {
 
     pub fn list_citations_for_event(&self, event_id: &EventId) -> KinforgeResult<Vec<Citation>> {
         self.db.list_citations_for_event(event_id)
+    }
+
+    pub fn list_citations_for_source(
+        &self,
+        source_id: &SourceId,
+    ) -> KinforgeResult<Vec<Citation>> {
+        self.db.list_citations_for_source(source_id)
+    }
+
+    pub fn list_all_citations(&self) -> KinforgeResult<Vec<Citation>> {
+        self.db.list_all_citations()
     }
 }
 

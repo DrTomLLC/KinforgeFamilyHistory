@@ -8,3 +8,4 @@ license.workspace = true
 kinforge_core = { workspace = true }
 kinforge_storage = { workspace = true }
 serde = { workspace = true }
+chrono = { workspace = true }

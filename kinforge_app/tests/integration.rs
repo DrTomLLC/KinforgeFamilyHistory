@@ -427,3 +427,349 @@ fn get_citation_roundtrip() {
     assert_eq!(fetched.page, Some("p.42".to_string()));
     assert_eq!(fetched.confidence, ConfidenceLevel::Primary);
 }
+
+// ── Phase 2: name editing ─────────────────────────────────────────────────────
+
+#[test]
+fn update_name_on_person() {
+    let a = app();
+    let p = a
+        .add_person(Some("Old"), Some("Name"), Sex::Unknown, None)
+        .unwrap();
+    let updated = a
+        .update_name_on_person(
+            &p.id,
+            0,
+            Some(Some("New".to_string())),
+            Some(Some("Person".to_string())),
+            None,
+        )
+        .unwrap();
+    assert_eq!(updated.display_name(), "New Person");
+    let fetched = a.get_person(&p.id).unwrap();
+    assert_eq!(fetched.display_name(), "New Person");
+}
+
+#[test]
+fn update_name_out_of_bounds_errors() {
+    let a = app();
+    let p = a
+        .add_person(Some("Jane"), Some("Doe"), Sex::Female, None)
+        .unwrap();
+    assert!(a
+        .update_name_on_person(&p.id, 5, None, None, None)
+        .is_err());
+}
+
+#[test]
+fn delete_name_from_person() {
+    let a = app();
+    let p = a
+        .add_person(Some("John"), Some("Smith"), Sex::Male, None)
+        .unwrap();
+    // Add a second name so we can delete the first
+    let p = a
+        .add_name_to_person(&p.id, Some("Johnny"), Some("Smith"), NameType::Nickname)
+        .unwrap();
+    assert_eq!(p.names.len(), 2);
+    let after = a.delete_name_from_person(&p.id, 1).unwrap();
+    assert_eq!(after.names.len(), 1);
+    assert_eq!(after.names[0].given, Some("John".to_string()));
+}
+
+#[test]
+fn delete_only_name_errors() {
+    let a = app();
+    let p = a
+        .add_person(Some("Solo"), None, Sex::Unknown, None)
+        .unwrap();
+    assert!(a.delete_name_from_person(&p.id, 0).is_err());
+}
+
+// ── Phase 2: notes search ─────────────────────────────────────────────────────
+
+#[test]
+fn search_notes_finds_person_notes() {
+    let a = app();
+    let mut p = a
+        .add_person(Some("Alice"), Some("Notesworthy"), Sex::Female, None)
+        .unwrap();
+    p.notes = Some("emigrated to Canada in 1902".to_string());
+    a.update_person(p).unwrap();
+
+    let results = a.search_notes("Canada").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].kind, "Person");
+    assert!(results[0].notes.contains("Canada"));
+}
+
+#[test]
+fn search_notes_finds_event_notes() {
+    let a = app();
+    let p = a
+        .add_person(Some("Bob"), Some("Clues"), Sex::Male, None)
+        .unwrap();
+    let mut e = a
+        .add_event(p.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    e.notes = Some("witnessed by Dr. Holmes".to_string());
+    a.update_event(e).unwrap();
+
+    let results = a.search_notes("Holmes").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].kind, "Event");
+}
+
+#[test]
+fn search_notes_case_insensitive() {
+    let a = app();
+    let mut p = a
+        .add_person(Some("Clara"), None, Sex::Female, None)
+        .unwrap();
+    p.notes = Some("Moved to BOSTON".to_string());
+    a.update_person(p).unwrap();
+
+    assert_eq!(a.search_notes("boston").unwrap().len(), 1);
+    assert_eq!(a.search_notes("BOSTON").unwrap().len(), 1);
+    assert_eq!(a.search_notes("xyz_no_match").unwrap().len(), 0);
+}
+
+// ── Phase 4: Merge, citations by source, ancestor tree ────────────────────────
+
+#[test]
+fn merge_person_combines_names_and_events() {
+    let a = app();
+    let source = a
+        .add_person(Some("William"), Some("Smith"), Sex::Male, Some("duplicate"))
+        .unwrap();
+    let target = a
+        .add_person(Some("Will"), Some("Smith"), Sex::Male, None)
+        .unwrap();
+
+    // Add an event on the source person
+    a.add_event(
+        source.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1880, 3, 1).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let merged = a.merge_person(&source.id, &target.id).unwrap();
+
+    // Source is gone
+    assert!(a.get_person(&source.id).is_err());
+
+    // Target has both names
+    assert_eq!(merged.names.len(), 2);
+
+    // Event is now on target
+    let events = a.list_events_for_person(&target.id).unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0].event_type, EventType::Birth));
+
+    // Notes merged
+    assert!(merged.notes.as_deref().unwrap_or("").contains("duplicate"));
+}
+
+#[test]
+fn merge_person_reassigns_relationships() {
+    let a = app();
+    let child = a
+        .add_person(Some("Charlie"), None, Sex::Male, None)
+        .unwrap();
+    let source_parent = a
+        .add_person(Some("Alice"), None, Sex::Female, None)
+        .unwrap();
+    let target_parent = a
+        .add_person(Some("Alicia"), None, Sex::Female, None)
+        .unwrap();
+
+    a.add_parent(child.id.clone(), source_parent.id.clone(), None)
+        .unwrap();
+
+    let merged = a.merge_person(&source_parent.id, &target_parent.id).unwrap();
+
+    // The child should now be linked to target_parent
+    let rels = a.list_relationships_for_person(&merged.id).unwrap();
+    let parent_rels: Vec<_> = rels
+        .iter()
+        .filter(|r| r.rel_type == RelationshipType::ParentChild)
+        .collect();
+    assert_eq!(parent_rels.len(), 1);
+    assert_eq!(parent_rels[0].person2_id, child.id);
+}
+
+#[test]
+fn merge_person_self_rejected() {
+    let a = app();
+    let p = a
+        .add_person(Some("John"), None, Sex::Male, None)
+        .unwrap();
+    assert!(a.merge_person(&p.id, &p.id).is_err());
+}
+
+#[test]
+fn list_citations_for_source_returns_correct() {
+    let a = app();
+    let person = a
+        .add_person(Some("Test"), None, Sex::Unknown, None)
+        .unwrap();
+    let event = a
+        .add_event(person.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    let source1 = a
+        .add_source("Book One", None, None, None, None, None)
+        .unwrap();
+    let source2 = a
+        .add_source("Book Two", None, None, None, None, None)
+        .unwrap();
+
+    a.add_citation(
+        source1.id.clone(),
+        event.id.clone(),
+        Some("p.12"),
+        ConfidenceLevel::Primary,
+        None,
+    )
+    .unwrap();
+    a.add_citation(
+        source1.id.clone(),
+        event.id.clone(),
+        Some("p.15"),
+        ConfidenceLevel::Secondary,
+        None,
+    )
+    .unwrap();
+    a.add_citation(
+        source2.id.clone(),
+        event.id.clone(),
+        None,
+        ConfidenceLevel::Questionable,
+        None,
+    )
+    .unwrap();
+
+    let s1_cits = a.list_citations_for_source(&source1.id).unwrap();
+    assert_eq!(s1_cits.len(), 2);
+
+    let s2_cits = a.list_citations_for_source(&source2.id).unwrap();
+    assert_eq!(s2_cits.len(), 1);
+}
+
+// ── Phase 5 tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn check_integrity_birth_after_death() {
+    let a = app();
+    let p = a
+        .add_person(Some("Ghost"), Some("Test"), Sex::Unknown, None)
+        .unwrap();
+    // Death before birth
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1950, 1, 1).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1940, 6, 15).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    let issues = a.check_integrity().unwrap();
+    let errors: Vec<_> = issues
+        .iter()
+        .filter(|i| i.severity == "error" && i.message.contains("birth") || i.message.contains("Birth"))
+        .collect();
+    assert!(!errors.is_empty(), "expected birth-after-death error");
+}
+
+#[test]
+fn check_integrity_detects_orphan_sources() {
+    let a = app();
+    a.add_source("Unused Book", None, None, None, None, None)
+        .unwrap();
+    let issues = a.check_integrity().unwrap();
+    let warnings: Vec<_> = issues
+        .iter()
+        .filter(|i| i.severity == "warning" && i.message.to_lowercase().contains("citation"))
+        .collect();
+    assert!(!warnings.is_empty(), "expected orphan-source warning");
+}
+
+#[test]
+fn event_query_year_range() {
+    use kinforge_query::EventQuery;
+    let a = app();
+    let p = a
+        .add_person(Some("Range"), Some("Test"), Sex::Male, None)
+        .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1800, 3, 1).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1870, 11, 20).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Marriage,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1900, 5, 10).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let results = EventQuery::new()
+        .from_year(1850)
+        .to_year(1880)
+        .run(&a.db)
+        .unwrap();
+    // Only the 1870 death event should be in 1850–1880
+    assert_eq!(results.len(), 1);
+    assert!(matches!(results[0].event_type, EventType::Death));
+}
+
+#[test]
+fn sources_report_renders() {
+    use kinforge_reports::sources_report;
+    let a = app();
+    let p = a
+        .add_person(Some("Alice"), None, Sex::Female, None)
+        .unwrap();
+    let ev = a
+        .add_event(p.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    let s1 = a.add_source("Used Source", None, None, None, None, None).unwrap();
+    let s2 = a.add_source("Orphan Source", None, None, None, None, None).unwrap();
+    a.add_citation(
+        s1.id.clone(),
+        ev.id.clone(),
+        None,
+        ConfidenceLevel::Primary,
+        None,
+    )
+    .unwrap();
+    let _ = s2; // deliberately uncited
+
+    let report = sources_report(&a.db).unwrap();
+    assert!(report.contains("Used Source"));
+    assert!(report.contains("Orphan Source"));
+    assert!(report.contains("1 citation") || report.contains("1")); // cited count
+}

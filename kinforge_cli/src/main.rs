@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 mod commands;
 use commands::{
-    citation::CitationCommands, event::EventCommands, export::ExportCommands,
-    import::ImportCommands, person::PersonCommands, place::PlaceCommands,
-    relationship::RelationshipCommands, report::ReportCommands, search::SearchCommands,
-    source::SourceCommands,
+    citation::CitationCommands, config::ConfigCommands, event::EventCommands,
+    export::ExportCommands, import::ImportCommands, person::PersonCommands,
+    place::PlaceCommands, relationship::RelationshipCommands, report::ReportCommands,
+    search::SearchCommands, source::SourceCommands,
 };
 
 #[derive(Parser)]
@@ -81,8 +81,12 @@ enum Commands {
     #[command(subcommand)]
     Search(SearchCommands),
 
-    /// Print the active configuration and data paths
-    Config,
+    /// Manage configuration (show, init, set)
+    #[command(subcommand)]
+    Config(ConfigCommands),
+
+    /// Run data integrity checks and report issues
+    Check,
 }
 
 fn main() -> Result<()> {
@@ -100,19 +104,9 @@ fn main() -> Result<()> {
         config.database_path = db_path;
     }
 
-    // Handle the Config meta-command before opening DB
-    if matches!(cli.command, Commands::Config) {
-        println!("Database path: {}", config.database_path.display());
-        println!("Backup on open: {}", config.backup_on_open);
-        println!("Max backups:    {}", config.max_backups);
-        println!("Log level:      {}", config.log_level);
-        if let Some(ref dir) = config.default_export_dir {
-            println!("Export dir:     {}", dir.display());
-        }
-        if let Some(p) = Config::default_config_path() {
-            println!("Config file:    {}", p.display());
-        }
-        return Ok(());
+    // Handle the Config meta-command before opening DB (does not require DB access)
+    if let Commands::Config(cmd) = cli.command {
+        return commands::config::handle(cmd, &config);
     }
 
     let app = Application::open(config)?;
@@ -128,7 +122,8 @@ fn main() -> Result<()> {
         Commands::Export(cmd) => commands::export::handle(cmd, &app)?,
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
-        Commands::Config => unreachable!(),
+        Commands::Check => commands::check::handle(&app)?,
+        Commands::Config(_) => unreachable!(),
     }
 
     Ok(())
