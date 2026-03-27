@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-27
-> **Build status:** 108 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.6.0
+> **Build status:** 113 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.7.0
 
 ---
 
@@ -100,7 +100,7 @@ Key design principles:
 | Plugin API skeleton | ✅ Skeleton present | — |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 100 tests passing, 0 failures, 0 warnings**
+**Total: 113 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -427,9 +427,17 @@ kinforge report family <ID>
 kinforge report timeline <ID>
 kinforge report sources
 kinforge report narrative <ID>
+kinforge report places
+kinforge report summary
+kinforge report path --from <ID> --to <ID>
+kinforge report global-timeline [--limit <N>]
 ```
 
 `--detailed` adds a birth-decade histogram and top-10 surname frequency table.
+
+`report path` prints the shortest relationship path between two people (BFS) with the number of degrees of separation.
+
+`report global-timeline` lists all events across all people in chronological order. Defaults to 200 events; use `--limit` to adjust.
 
 ### `search`
 
@@ -517,7 +525,7 @@ Opens an interactive terminal UI with four tabs:
 |-----|---------|
 | **People** | Scrollable list with birth years; `/` to filter by name; `Enter` for detail panel showing events and relationships |
 | **Tasks** | Scrollable list grouped by status (In Progress → Pending → Done); shows priority badge and strikethrough for done tasks; `f` cycles status filter |
-| **Sources** | Scrollable list with citation counts; `Enter` for citation detail panel showing linked events |
+| **Sources** | Scrollable list with citation counts; `/` to filter by title; `Enter` for citation detail panel showing linked events |
 | **Stats** | Database record counts and database file path |
 
 **Key bindings:**
@@ -541,6 +549,8 @@ Opens an interactive terminal UI with four tabs:
 | `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
 | `r` | People (detail open) | Open add-relationship popup (type ←/→, person name search) |
 | `x` | People | Open confirm-delete popup for selected person |
+| `e` | Sources | Edit selected source (title, author, year; prefilled popup) |
+| `/` | Sources | Enter search/filter mode for source titles |
 | `x` | Sources | Open confirm-delete popup for selected source |
 | `s` | People | Toggle sort order (name ↔ birth year) |
 | `g` | People, Tasks, Sources | Jump to top of list |
@@ -661,6 +671,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI Stats: avg events/person and citation coverage % derived metrics
 - [x] `kinforge report summary` — compact overview: counts, completeness, top surnames + event types
 - [x] `kinforge search tasks` — search tasks by keyword, status, priority, linked person
+
+**v1.7.0 (Phase 21):**
+- [x] TUI: `e` in Sources tab — edit source popup (title, author, year; prefilled)
+- [x] TUI: `/` in Sources tab — filter sources list by title (context-aware search mode)
+- [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
+- [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

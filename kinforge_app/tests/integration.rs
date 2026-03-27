@@ -1430,3 +1430,69 @@ fn stats_avg_events_per_person() {
     let avg = s.events as f64 / s.people as f64;
     assert!((avg - 1.5).abs() < 0.001);
 }
+
+// ── Phase 21 tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn source_update_title_and_author() {
+    let a = app();
+    let s = a.add_source("Original Title", Some("Old Author"), None, None, None, None).unwrap();
+    let mut updated = a.get_source(&s.id).unwrap();
+    updated.title = "New Title".to_string();
+    updated.author = Some("New Author".to_string());
+    let saved = a.update_source(updated).unwrap();
+    assert_eq!(saved.title, "New Title");
+    assert_eq!(saved.author.as_deref(), Some("New Author"));
+    let fetched = a.get_source(&s.id).unwrap();
+    assert_eq!(fetched.title, "New Title");
+}
+
+#[test]
+fn relationship_path_finds_two_hop_connection() {
+    let a = app();
+    let p1 = a.add_person(Some("Alice"), None, Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("Bob"), None, Sex::Male, None).unwrap();
+    let p3 = a.add_person(Some("Carol"), None, Sex::Female, None).unwrap();
+    a.add_relationship(RelationshipType::Spouse, p1.id.clone(), p2.id.clone(), None).unwrap();
+    a.add_relationship(RelationshipType::ParentChild, p2.id.clone(), p3.id.clone(), None).unwrap();
+    let path = a.find_relationship_path(&p1.id, &p3.id).unwrap();
+    assert!(path.is_some());
+    let p = path.unwrap();
+    assert_eq!(p.steps.len(), 3); // Alice → Bob → Carol
+}
+
+#[test]
+fn relationship_path_no_connection_returns_none() {
+    let a = app();
+    let p1 = a.add_person(Some("Alice"), None, Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("Bob"), None, Sex::Male, None).unwrap();
+    // No relationships added
+    let path = a.find_relationship_path(&p1.id, &p2.id).unwrap();
+    assert!(path.is_none());
+}
+
+#[test]
+fn global_timeline_report_shows_all_events() {
+    use kinforge_reports::global_timeline_report;
+    let a = app();
+    let p = a.add_person(Some("Harriet"), Some("Tubman"), Sex::Female, None).unwrap();
+    let date = EventDate::Exact(chrono::NaiveDate::from_ymd_opt(1822, 3, 1).unwrap());
+    a.add_event(p.id.clone(), EventType::Birth, Some(date), Some("Dorchester County, Maryland"), None).unwrap();
+    let report = global_timeline_report(a.database(), 200).unwrap();
+    assert!(report.contains("Birth"));
+    assert!(report.contains("Harriet Tubman"));
+}
+
+#[test]
+fn source_filter_by_title_substring() {
+    let a = app();
+    a.add_source("United States Census 1880", None, None, Some(1880), None, None).unwrap();
+    a.add_source("Church Baptism Records", None, None, Some(1750), None, None).unwrap();
+    a.add_source("United States Census 1900", None, None, Some(1900), None, None).unwrap();
+    let all = a.list_sources().unwrap();
+    let matching: Vec<_> = all.iter()
+        .filter(|s| s.title.to_lowercase().contains("census"))
+        .collect();
+    assert_eq!(matching.len(), 2);
+    assert!(matching.iter().all(|s| s.title.contains("Census")));
+}

@@ -679,6 +679,9 @@ fn draw_sources(frame: &mut Frame, state: &TuiState, area: Rect) {
     if state.mode == InputMode::SourceCreate {
         draw_source_create_popup(frame, state, area);
     }
+    if state.mode == InputMode::SourceEdit {
+        draw_source_edit_popup(frame, state, area);
+    }
 }
 
 fn draw_source_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -730,11 +733,60 @@ fn draw_source_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
     frame.render_widget(para, popup_area);
 }
 
+fn draw_source_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 62_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 7 };
+
+    let cursor = "_";
+    let title_text = if state.source_edit_field == 0 {
+        format!("{}{}", state.source_edit_title, cursor)
+    } else { state.source_edit_title.clone() };
+    let author_text = if state.source_edit_field == 1 {
+        format!("{}{}", state.source_edit_author, cursor)
+    } else { state.source_edit_author.clone() };
+    let year_text = if state.source_edit_field == 2 {
+        format!("{}{}", state.source_edit_year, cursor)
+    } else { state.source_edit_year.clone() };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Title:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(title_text, if state.source_edit_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Author:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(author_text, if state.source_edit_field == 1 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Year:    ", Style::default().fg(Color::Cyan)),
+            Span::styled(year_text, if state.source_edit_field == 2 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Source — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
 fn draw_sources_list(frame: &mut Frame, state: &TuiState, area: Rect) {
     let items: Vec<ListItem> = state
-        .sources
+        .filtered_sources
         .iter()
-        .map(|s| {
+        .map(|&idx| {
+            let s = &state.sources[idx];
             let year_str = s
                 .year
                 .map(|y| format!(" {}", y))
@@ -754,15 +806,26 @@ fn draw_sources_list(frame: &mut Frame, state: &TuiState, area: Rect) {
         .collect();
 
     let mut list_state = ListState::default();
-    if !state.sources.is_empty() {
+    if !state.filtered_sources.is_empty() {
         list_state.select(Some(state.sources_selected));
     }
+
+    let title = if !state.source_search_query.is_empty() {
+        format!(
+            " Sources — \"{}\" ({}/{}) ",
+            state.source_search_query,
+            state.filtered_sources.len(),
+            state.sources.len()
+        )
+    } else {
+        format!(" Sources ({}) ", state.sources.len())
+    };
 
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Sources ({}) ", state.sources.len())),
+                .title(title),
         )
         .highlight_style(
             Style::default()
@@ -990,10 +1053,11 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
 
 fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
     let text = match state.mode {
-        InputMode::Search => format!(
-            " ESC: cancel  Backspace: delete  [{} match(es)]",
-            state.filtered_people.len()
-        ),
+        InputMode::Search => if state.active_tab == Tab::Sources {
+            format!(" ESC: cancel  Backspace: delete  [{} match(es)]", state.filtered_sources.len())
+        } else {
+            format!(" ESC: cancel  Backspace: delete  [{} match(es)]", state.filtered_people.len())
+        },
         InputMode::TaskCreate => " Type task description  Enter: save  Esc: cancel".to_string(),
         InputMode::TaskEdit => " Tab: switch field  ←/→: priority  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
@@ -1002,6 +1066,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::ConfirmDelete => " y: confirm delete  any other key: cancel".to_string(),
         InputMode::EventCreate => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::RelationshipCreate => " Tab: switch field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
+        InputMode::SourceEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
@@ -1016,7 +1081,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
                 if state.source_detail_open {
                     " ESC/Enter: close  ↑↓/jk: scroll  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next  ↑↓/jk: navigate  g/G: top/bottom  n: new  x: delete  Enter: citations  q: quit".to_string()
+                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  x: delete  /: search  Enter: citations  q: quit".to_string()
                 }
             }
             Tab::Stats => " Tab: next tab  q: quit".to_string(),

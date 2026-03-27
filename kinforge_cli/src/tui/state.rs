@@ -67,6 +67,7 @@ pub enum InputMode {
     PersonCreate,
     PersonEdit,
     SourceCreate,
+    SourceEdit,
     ConfirmDelete,
     EventCreate,
     RelationshipCreate,
@@ -180,6 +181,8 @@ pub struct TuiState {
     // Sources list
     pub sources: Vec<SourceRow>,
     pub sources_selected: usize,
+    pub filtered_sources: Vec<usize>, // indices into `sources`
+    pub source_search_query: String,
     pub source_detail_open: bool,
     pub source_detail_citations: Vec<(String, String)>, // (event label, page/notes)
     pub source_detail_scroll: usize,
@@ -232,6 +235,13 @@ pub struct TuiState {
     pub source_create_title: String,
     pub source_create_author: String,
     pub source_create_field: u8, // 0 = title, 1 = author
+
+    // Inline source edit
+    pub source_edit_id: Option<SourceId>,
+    pub source_edit_title: String,
+    pub source_edit_author: String,
+    pub source_edit_year: String,    // stored as string for typing; parsed on Enter
+    pub source_edit_field: u8,       // 0 = title, 1 = author, 2 = year
 
     // Inline event creation (from person detail panel)
     pub event_create_type_idx: usize,   // index into TUI_EVENT_TYPES
@@ -308,6 +318,8 @@ impl TuiState {
             task_rows,
             tasks_selected: first_task,
             task_status_filter: TaskStatusFilter::All,
+            filtered_sources: (0..sources.len()).collect(),
+            source_search_query: String::new(),
             sources,
             sources_selected: 0,
             source_detail_open: false,
@@ -340,6 +352,11 @@ impl TuiState {
             source_create_title: String::new(),
             source_create_author: String::new(),
             source_create_field: 0,
+            source_edit_id: None,
+            source_edit_title: String::new(),
+            source_edit_author: String::new(),
+            source_edit_year: String::new(),
+            source_edit_field: 0,
             event_create_type_idx: 0,
             event_create_date: String::new(),
             event_create_place: String::new(),
@@ -383,10 +400,6 @@ impl TuiState {
     pub fn selected_person(&self) -> Option<&PersonRow> {
         let idx = *self.filtered_people.get(self.people_selected)?;
         self.people.get(idx)
-    }
-
-    pub fn selected_source(&self) -> Option<&SourceRow> {
-        self.sources.get(self.sources_selected)
     }
 
     /// Reload tasks from the DB and rebuild the row list.
@@ -439,9 +452,28 @@ impl TuiState {
     /// Reload the sources list from the DB and select the last entry.
     pub fn reload_sources(&mut self, app: &Application) {
         self.sources = load_sources(app);
-        if !self.sources.is_empty() {
-            self.sources_selected = self.sources.len() - 1;
+        self.recompute_source_filter();
+        if !self.filtered_sources.is_empty() {
+            self.sources_selected = self.filtered_sources.len() - 1;
         }
+    }
+
+    pub fn recompute_source_filter(&mut self) {
+        let q = self.source_search_query.to_lowercase();
+        self.filtered_sources = self.sources
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.title.to_lowercase().contains(&q))
+            .map(|(i, _)| i)
+            .collect();
+        if self.sources_selected >= self.filtered_sources.len() {
+            self.sources_selected = self.filtered_sources.len().saturating_sub(1);
+        }
+    }
+
+    pub fn selected_source(&self) -> Option<&SourceRow> {
+        let idx = *self.filtered_sources.get(self.sources_selected)?;
+        self.sources.get(idx)
     }
 
     /// Recompute top-places (called after events change).

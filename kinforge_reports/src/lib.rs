@@ -1199,6 +1199,72 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
+// ─── global timeline report ─────────────────────────────────────────────────
+
+/// Chronological timeline of all events across the database, with person names.
+pub fn global_timeline_report(db: &Database, limit: usize) -> KinforgeResult<String> {
+    let mut all_events = db.list_all_events()?;
+    let mut out = String::new();
+
+    // Sort: dated events chronologically, undated at end
+    all_events.sort_by(|a, b| {
+        let key = |e: &Event| -> Option<NaiveDate> {
+            e.date.as_ref().and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd)
+                | EventDate::Before(nd) | EventDate::After(nd)
+                | EventDate::Between(nd, _) => Some(*nd),
+                EventDate::Unknown => None,
+            })
+        };
+        match (key(a), key(b)) {
+            (Some(da), Some(db)) => da.cmp(&db),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+
+    let total = all_events.len();
+    let shown = total.min(limit);
+
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Global Timeline ({} events, showing {})  ", total, shown)
+            .bold().bright_cyan().on_black(),
+        "─".repeat(44).bright_black()
+    ));
+
+    for e in all_events.iter().take(limit) {
+        let person_name = db.get_person(&e.person_id)
+            .map(|p| p.display_name())
+            .unwrap_or_else(|_| e.person_id.to_string());
+        let date_str = e.date.as_ref()
+            .map(|d| d.to_string().yellow().to_string())
+            .unwrap_or_else(|| "undated".bright_black().to_string());
+        let place_str = e.place_id.as_ref()
+            .and_then(|pid| db.get_place(pid).ok())
+            .map(|pl| format!(" @ {}", pl.name.green()))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "  {:<12} {}  {}  {}{}\n",
+            e.event_type.to_string().bright_cyan(),
+            date_str,
+            person_name.bold(),
+            "".to_string(),
+            place_str
+        ));
+    }
+
+    if total > limit {
+        out.push_str(&format!(
+            "\n  {} more events not shown (use --limit to increase)\n",
+            (total - limit).to_string().bright_black()
+        ));
+    }
+
+    Ok(out)
+}
+
 // ─── summary report ─────────────────────────────────────────────────────────
 
 /// One-page compact summary: counts, completeness metrics, top surnames, top event types.

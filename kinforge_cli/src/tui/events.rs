@@ -23,6 +23,7 @@ pub enum Action {
     DeleteSource(SourceId),
     EditTask(TaskId, String, kinforge_core::models::TaskPriority),
     CreateRelationship(PersonId, String, PersonId), // (person1, rel_type_token, person2)
+    EditSource(SourceId, String, String, Option<i32>), // (id, title, author, year)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -47,6 +48,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::EventCreate => handle_event_create(state, key),
         InputMode::TaskEdit => handle_task_edit(state, key),
         InputMode::RelationshipCreate => handle_rel_create(state, key),
+        InputMode::SourceEdit => handle_source_edit(state, key),
     }
 }
 
@@ -121,6 +123,11 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
 
         KeyCode::Char('/') if state.active_tab == Tab::People && !state.detail_open => {
             state.search_active = true;
+            state.mode = InputMode::Search;
+            Action::None
+        }
+
+        KeyCode::Char('/') if state.active_tab == Tab::Sources && !state.source_detail_open => {
             state.mode = InputMode::Search;
             Action::None
         }
@@ -220,6 +227,22 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             state.source_create_author.clear();
             state.source_create_field = 0;
             state.mode = InputMode::SourceCreate;
+            Action::None
+        }
+
+        // Edit source: press 'e' in Sources tab (when no detail open)
+        KeyCode::Char('e') if state.active_tab == Tab::Sources && !state.source_detail_open => {
+            let info = state.selected_source().map(|s| {
+                (s.id.clone(), s.title.clone(), s.author.clone().unwrap_or_default(), s.year)
+            });
+            if let Some((sid, title, author, year)) = info {
+                state.source_edit_id = Some(sid);
+                state.source_edit_title = title;
+                state.source_edit_author = author;
+                state.source_edit_year = year.map(|y| y.to_string()).unwrap_or_default();
+                state.source_edit_field = 0;
+                state.mode = InputMode::SourceEdit;
+            }
             Action::None
         }
 
@@ -398,38 +421,63 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
 }
 
 fn handle_search(state: &mut TuiState, key: KeyEvent) -> Action {
+    let in_sources = state.active_tab == Tab::Sources;
     match key.code {
         KeyCode::Esc => {
-            state.search_active = false;
-            state.search_query.clear();
             state.mode = InputMode::Normal;
-            state.recompute_filter();
+            if in_sources {
+                state.source_search_query.clear();
+                state.recompute_source_filter();
+            } else {
+                state.search_active = false;
+                state.search_query.clear();
+                state.recompute_filter();
+            }
         }
         KeyCode::Enter => {
-            state.search_active = false;
             state.mode = InputMode::Normal;
-            if let Some(row) = state.selected_person() {
-                return Action::OpenPersonDetail(row.id.clone());
+            if in_sources {
+                // keep filter active, just exit typing
+            } else {
+                state.search_active = false;
+                if let Some(row) = state.selected_person() {
+                    return Action::OpenPersonDetail(row.id.clone());
+                }
             }
         }
         KeyCode::Backspace => {
-            state.search_query.pop();
-            state.recompute_filter();
+            if in_sources {
+                state.source_search_query.pop();
+                state.recompute_source_filter();
+            } else {
+                state.search_query.pop();
+                state.recompute_filter();
+            }
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            if state.people_selected > 0 {
+            if in_sources {
+                state.sources_selected = state.sources_selected.saturating_sub(1);
+            } else if state.people_selected > 0 {
                 state.people_selected -= 1;
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            let max = state.filtered_people.len().saturating_sub(1);
-            if state.people_selected < max {
-                state.people_selected += 1;
+            if in_sources {
+                let max = state.filtered_sources.len().saturating_sub(1);
+                if state.sources_selected < max { state.sources_selected += 1; }
+            } else {
+                let max = state.filtered_people.len().saturating_sub(1);
+                if state.people_selected < max { state.people_selected += 1; }
             }
         }
         KeyCode::Char(c) => {
-            state.search_query.push(c);
-            state.recompute_filter();
+            if in_sources {
+                state.source_search_query.push(c);
+                state.recompute_source_filter();
+            } else {
+                state.search_query.push(c);
+                state.recompute_filter();
+            }
         }
         _ => {}
     }
@@ -707,6 +755,51 @@ fn move_task_down(state: &mut TuiState) {
         }
         i += 1;
     }
+}
+
+fn handle_source_edit(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.source_edit_id = None;
+        }
+        KeyCode::Tab => {
+            state.source_edit_field = (state.source_edit_field + 1) % 3;
+        }
+        KeyCode::BackTab => {
+            state.source_edit_field = (state.source_edit_field + 2) % 3;
+        }
+        KeyCode::Enter => {
+            if let Some(sid) = state.source_edit_id.take() {
+                let title = state.source_edit_title.trim().to_string();
+                if !title.is_empty() {
+                    let author = state.source_edit_author.trim().to_string();
+                    let year = state.source_edit_year.trim().parse::<i32>().ok();
+                    state.mode = InputMode::Normal;
+                    return Action::EditSource(sid, title, author, year);
+                }
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace => {
+            match state.source_edit_field {
+                0 => { state.source_edit_title.pop(); }
+                1 => { state.source_edit_author.pop(); }
+                2 => { state.source_edit_year.pop(); }
+                _ => {}
+            }
+        }
+        KeyCode::Char(c) => {
+            match state.source_edit_field {
+                0 => state.source_edit_title.push(c),
+                1 => state.source_edit_author.push(c),
+                2 if c.is_ascii_digit() || c == '-' => state.source_edit_year.push(c),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Action::None
 }
 
 fn handle_rel_create(state: &mut TuiState, key: KeyEvent) -> Action {

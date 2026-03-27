@@ -183,6 +183,19 @@ fn run(
                         }
                     }
 
+                    events::Action::EditSource(sid, title, author, year) => {
+                        if let Ok(mut source) = app.get_source(&sid) {
+                            source.title = title;
+                            source.author = if author.is_empty() { None } else { Some(author) };
+                            source.year = year;
+                            let _ = app.update_source(source);
+                            state.reload_sources(app);
+                            if state.sources_selected >= state.filtered_sources.len() {
+                                state.sources_selected = state.filtered_sources.len().saturating_sub(1);
+                            }
+                        }
+                    }
+
                     events::Action::CreateRelationship(pid1, rel_type_token, pid2) => {
                         if let Ok(rt) = rel_type_token.parse::<RelationshipType>() {
                             let _ = app.add_relationship(rt, pid1.clone(), pid2, None);
