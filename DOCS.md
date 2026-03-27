@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-03-27
 > **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.1.0
+> **Version:** 1.2.0
 
 ---
 
@@ -519,6 +519,8 @@ Opens an interactive terminal UI with four tabs:
 | `n` | Sources | Open inline popup to create a new source (Title + Author) |
 | `p` | Tasks | Cycle selected task's priority (Low → Medium → High → Low) |
 | `x` | Tasks | Delete selected task |
+| `x` | People | Open confirm-delete popup for selected person |
+| `s` | People | Toggle sort order (name ↔ birth year) |
 | `g` | People, Tasks, Sources | Jump to top of list |
 | `G` | People, Tasks, Sources | Jump to bottom of list |
 | `PageUp` / `PageDown` | People, Tasks, Sources | Scroll 10 items at a time |
@@ -607,6 +609,11 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `PageUp`/`PageDown` scroll 10 items at a time
 - [x] TUI: `n` in Sources tab creates a new source (title + author popup)
 - [x] `kinforge export events-csv` — all events as CSV (person, type, date, place)
+
+**v1.2.0:**
+- [x] TUI: `x` in People tab — confirm-delete popup (red border, y/any-key)
+- [x] TUI: `s` in People tab — toggle sort order (name ↔ birth year); badge in list title
+- [x] `kinforge person list --sort name|birth-year` — sorted person list
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

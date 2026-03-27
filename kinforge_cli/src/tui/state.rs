@@ -48,6 +48,30 @@ pub enum InputMode {
     TaskCreate,
     PersonCreate,
     SourceCreate,
+    ConfirmDelete,
+}
+
+// ── SortOrder ─────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    Name,
+    BirthYear,
+}
+
+impl SortOrder {
+    pub fn next(self) -> Self {
+        match self {
+            SortOrder::Name => SortOrder::BirthYear,
+            SortOrder::BirthYear => SortOrder::Name,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            SortOrder::Name => "name",
+            SortOrder::BirthYear => "birth yr",
+        }
+    }
 }
 
 // ── Row types ─────────────────────────────────────────────────────────────────
@@ -117,6 +141,13 @@ pub struct TuiState {
     // Global
     pub mode: InputMode,
     pub should_quit: bool,
+
+    // People sort order
+    pub sort_order: SortOrder,
+
+    // Delete confirmation
+    pub confirm_name: String,
+    pub confirm_person_id: Option<PersonId>,
 
     // Inline task creation
     pub task_create_buf: String,
@@ -201,6 +232,9 @@ impl TuiState {
             tasks_done,
             mode: InputMode::Normal,
             should_quit: false,
+            sort_order: SortOrder::Name,
+            confirm_name: String::new(),
+            confirm_person_id: None,
             task_create_buf: String::new(),
             person_create_given: String::new(),
             person_create_surname: String::new(),
@@ -213,13 +247,27 @@ impl TuiState {
 
     pub fn recompute_filter(&mut self) {
         let q = self.search_query.to_lowercase();
-        self.filtered_people = self
+        let mut indices: Vec<usize> = self
             .people
             .iter()
             .enumerate()
             .filter(|(_, p)| p.display_name.to_lowercase().contains(&q))
             .map(|(i, _)| i)
             .collect();
+        // Apply sort
+        match self.sort_order {
+            SortOrder::Name => {
+                indices.sort_by(|&a, &b| {
+                    self.people[a].display_name.cmp(&self.people[b].display_name)
+                });
+            }
+            SortOrder::BirthYear => {
+                indices.sort_by(|&a, &b| {
+                    self.people[a].birth_year.cmp(&self.people[b].birth_year)
+                });
+            }
+        }
+        self.filtered_people = indices;
         if self.people_selected >= self.filtered_people.len() {
             self.people_selected = self.filtered_people.len().saturating_sub(1);
         }

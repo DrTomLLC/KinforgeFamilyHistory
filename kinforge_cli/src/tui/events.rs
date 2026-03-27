@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use kinforge_core::models::{PersonId, SourceId, TaskId};
 
-use super::state::{first_task_item_idx, InputMode, Tab, TaskRow, TuiState};
+use super::state::{first_task_item_idx, InputMode, SortOrder, Tab, TaskRow, TuiState};
 
 pub enum Action {
     None,
@@ -14,6 +14,7 @@ pub enum Action {
     DeleteTask(TaskId),
     CreatePerson(String, String),  // (given, surname)
     CreateSource(String, String),  // (title, author)
+    DeletePerson(PersonId),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -33,6 +34,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::TaskCreate => handle_task_create(state, key),
         InputMode::PersonCreate => handle_person_create(state, key),
         InputMode::SourceCreate => handle_source_create(state, key),
+        InputMode::ConfirmDelete => handle_confirm_delete(state, key),
     }
 }
 
@@ -218,6 +220,24 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Delete person: press 'x' in People tab (opens confirm popup)
+        KeyCode::Char('x') if state.active_tab == Tab::People && !state.detail_open => {
+            let info = state.selected_person().map(|r| (r.display_name.clone(), r.id.clone()));
+            if let Some((name, pid)) = info {
+                state.confirm_name = name;
+                state.confirm_person_id = Some(pid);
+                state.mode = InputMode::ConfirmDelete;
+            }
+            Action::None
+        }
+
+        // Toggle sort order: press 's' in People tab
+        KeyCode::Char('s') if state.active_tab == Tab::People && !state.detail_open && !state.search_active => {
+            state.sort_order = state.sort_order.next();
+            state.recompute_filter();
+            Action::None
+        }
+
         // Task quick-complete: press 'd' or 'c' on a task
         KeyCode::Char('d') | KeyCode::Char('c') if state.active_tab == Tab::Tasks => {
             if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
@@ -362,6 +382,26 @@ fn handle_person_create(state: &mut TuiState, key: KeyEvent) -> Action {
             }
         }
         _ => {}
+    }
+    Action::None
+}
+
+fn handle_confirm_delete(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            if let Some(pid) = state.confirm_person_id.take() {
+                state.confirm_name.clear();
+                state.mode = InputMode::Normal;
+                return Action::DeletePerson(pid);
+            }
+            state.mode = InputMode::Normal;
+        }
+        _ => {
+            // Any other key cancels
+            state.confirm_person_id = None;
+            state.confirm_name.clear();
+            state.mode = InputMode::Normal;
+        }
     }
     Action::None
 }

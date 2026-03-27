@@ -102,6 +102,16 @@ fn run(
                         state.reload_sources(app);
                     }
 
+                    events::Action::DeletePerson(pid) => {
+                        let _ = app.delete_person(&pid);
+                        // Close detail if it was showing the deleted person
+                        if state.detail_person_id.as_ref() == Some(&pid) {
+                            state.detail_open = false;
+                            state.detail_person_id = None;
+                        }
+                        state.reload_people(app);
+                    }
+
                     events::Action::None => {}
                 }
             }

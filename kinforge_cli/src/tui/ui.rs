@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{InputMode, Tab, TaskRow, TuiState};
+use super::state::{InputMode, SortOrder, Tab, TaskRow, TuiState};
 use kinforge_core::models::{TaskPriority, TaskStatus};
 
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -77,6 +77,33 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     if state.mode == InputMode::PersonCreate {
         draw_person_create_popup(frame, state, area);
     }
+    if state.mode == InputMode::ConfirmDelete {
+        draw_confirm_delete_popup(frame, state, area);
+    }
+}
+
+fn draw_confirm_delete_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 52_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 1;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 3 };
+
+    let name = truncate(&state.confirm_name, 30);
+    let msg = format!("  Delete \"{}\"?  y = confirm · any key = cancel", name);
+
+    let para = Paragraph::new(Line::from(Span::styled(
+        msg,
+        Style::default().fg(Color::White),
+    )))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Confirm Delete ")
+            .border_style(Style::default().fg(Color::Red)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
 }
 
 fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -129,6 +156,7 @@ fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
 }
 
 fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let sort_badge = format!("[sort: {}]", state.sort_order.label());
     let title = if state.search_active {
         format!(
             " People — Filter: {} ({} match) ",
@@ -137,13 +165,14 @@ fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
         )
     } else if !state.search_query.is_empty() {
         format!(
-            " People — \"{}\" ({}/{}) ",
+            " People — \"{}\" ({}/{}) {} ",
             state.search_query,
             state.filtered_people.len(),
-            state.people.len()
+            state.people.len(),
+            sort_badge
         )
     } else {
-        format!(" People ({}) ", state.people.len())
+        format!(" People ({}) {} ", state.people.len(), sort_badge)
     };
 
     let items: Vec<ListItem> = state
@@ -667,12 +696,13 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::TaskCreate => " Type task description  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::SourceCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
+        InputMode::ConfirmDelete => " y: confirm delete  any other key: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
                     " ESC/Enter: close  ↑↓/jk: scroll  /: search  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next  ↑↓/jk: navigate  g/G: top/bottom  PgUp/Dn  n: new  /: search  Enter: detail  q: quit"
+                    " Tab: next  ↑↓/jk  g/G  PgUp/Dn  n: new  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()
                 }
             }
