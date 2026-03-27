@@ -4,6 +4,15 @@ use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
 use kinforge_storage::{repository::DatabaseStats, Database};
 use std::path::Path;
 
+/// A single issue found during an integrity check.
+#[derive(Debug, Clone)]
+pub struct IntegrityIssue {
+    pub severity: &'static str, // "warning" or "error"
+    pub entity_type: String,
+    pub id: String,
+    pub message: String,
+}
+
 /// A single hit from a notes full-text search.
 #[derive(Debug, Clone)]
 pub struct NotesMatch {
@@ -214,6 +223,162 @@ impl Application {
 
     pub fn delete_person(&self, id: &PersonId) -> KinforgeResult<()> {
         self.db.delete_person(id)
+    }
+
+    // ── ID resolution (full UUID or unambiguous prefix) ────────────────────
+
+    /// Resolve a person ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_person_id(&self, input: &str) -> KinforgeResult<PersonId> {
+        if let Ok(pid) = PersonId::from_str(input) {
+            return Ok(pid);
+        }
+        self.db.find_person_by_id_prefix(input).map(|p| p.id)
+    }
+
+    /// Resolve an event ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_event_id(&self, input: &str) -> KinforgeResult<EventId> {
+        if let Ok(eid) = EventId::from_str(input) {
+            return Ok(eid);
+        }
+        self.db.find_event_by_id_prefix(input).map(|e| e.id)
+    }
+
+    /// Resolve a place ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_place_id(&self, input: &str) -> KinforgeResult<PlaceId> {
+        if let Ok(pid) = PlaceId::from_str(input) {
+            return Ok(pid);
+        }
+        self.db.find_place_by_id_prefix(input).map(|p| p.id)
+    }
+
+    /// Resolve a relationship ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_relationship_id(&self, input: &str) -> KinforgeResult<RelationshipId> {
+        if let Ok(rid) = RelationshipId::from_str(input) {
+            return Ok(rid);
+        }
+        self.db
+            .find_relationship_by_id_prefix(input)
+            .map(|r| r.id)
+    }
+
+    /// Resolve a source ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_source_id(&self, input: &str) -> KinforgeResult<SourceId> {
+        if let Ok(sid) = SourceId::from_str(input) {
+            return Ok(sid);
+        }
+        self.db.find_source_by_id_prefix(input).map(|s| s.id)
+    }
+
+    /// Resolve a citation ID from a full UUID string or a short unambiguous prefix.
+    pub fn resolve_citation_id(&self, input: &str) -> KinforgeResult<CitationId> {
+        if let Ok(cid) = CitationId::from_str(input) {
+            return Ok(cid);
+        }
+        self.db.find_citation_by_id_prefix(input).map(|c| c.id)
+    }
+
+    // ── Convenience family-link methods ───────────────────────────────────
+
+    /// Record that `parent_id` is a parent of `child_id`.
+    pub fn add_parent(
+        &self,
+        child_id: PersonId,
+        parent_id: PersonId,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Relationship> {
+        self.add_relationship(RelationshipType::ParentChild, parent_id, child_id, notes)
+    }
+
+    /// Record that `child_id` is a child of `parent_id`.
+    pub fn add_child(
+        &self,
+        parent_id: PersonId,
+        child_id: PersonId,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Relationship> {
+        self.add_relationship(RelationshipType::ParentChild, parent_id, child_id, notes)
+    }
+
+    /// Record a spouse relationship between two people.
+    pub fn add_spouse(
+        &self,
+        person1_id: PersonId,
+        person2_id: PersonId,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Relationship> {
+        self.add_relationship(RelationshipType::Spouse, person1_id, person2_id, notes)
+    }
+
+    // ── Data integrity check ───────────────────────────────────────────────
+
+    /// Run a sweep of the database looking for common data quality problems.
+    pub fn check_integrity(&self) -> KinforgeResult<Vec<IntegrityIssue>> {
+        let mut issues: Vec<IntegrityIssue> = Vec::new();
+
+        // People with no names
+        for person in self.db.list_people()? {
+            if person.names.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "error",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: "has no names".to_string(),
+                });
+            } else if person.display_name() == "(unnamed)" {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: "primary name has no given or surname".to_string(),
+                });
+            }
+
+            // People with no events at all
+            let events = self.db.list_events_for_person(&person.id)?;
+            if events.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: format!(
+                        "{} has no events (no birth, death, or any other event)",
+                        person.display_name()
+                    ),
+                });
+            }
+
+            // Events with no date
+            for event in &events {
+                if event.date.is_none() {
+                    issues.push(IntegrityIssue {
+                        severity: "warning",
+                        entity_type: "Event".to_string(),
+                        id: event.id.to_string(),
+                        message: format!(
+                            "{} event for {} has no date",
+                            event.event_type,
+                            person.display_name()
+                        ),
+                    });
+                }
+            }
+
+            // People with no relationships
+            let rels = self.db.list_relationships_for_person(&person.id)?;
+            if rels.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Person".to_string(),
+                    id: person.id.to_string(),
+                    message: format!(
+                        "{} has no relationships (not linked to any parent, child, or spouse)",
+                        person.display_name()
+                    ),
+                });
+            }
+        }
+
+        Ok(issues)
     }
 
     // ── Events ─────────────────────────────────────────────────────────────

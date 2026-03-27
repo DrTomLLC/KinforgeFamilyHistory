@@ -418,6 +418,7 @@ dependencies = [
 name = "kinforge_reports"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "colored",
  "kinforge_core",
  "kinforge_storage",

@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use colored::Colorize;
 use kinforge_core::{models::*, KinforgeResult};
 use kinforge_storage::Database;
@@ -434,6 +435,73 @@ pub fn family_group_sheet(db: &Database, person_id: &PersonId) -> KinforgeResult
                 ));
             }
         }
+    }
+
+    out.push('\n');
+    Ok(out)
+}
+
+// ─── timeline report ─────────────────────────────────────────────────────────
+
+/// Generate a chronological timeline of all recorded events for a person.
+pub fn timeline_report(db: &Database, person_id: &PersonId) -> KinforgeResult<String> {
+    let person = db.get_person(person_id)?;
+    let mut events = db.list_events_for_person(person_id)?;
+    let mut out = String::new();
+
+    let header = format!("  Timeline: {}  ", person.display_name());
+    out.push_str(&format!("{}\n", header.bold().bright_cyan().on_black()));
+    out.push_str(&format!("{}\n\n", "─".repeat(header.len()).bright_black()));
+
+    if events.is_empty() {
+        out.push_str(&format!("{}\n", "No events recorded.".bright_black()));
+        return Ok(out);
+    }
+
+    // Sort: events with a date first (chronologically), undated last.
+    events.sort_by(|a, b| {
+        let key = |e: &Event| -> Option<NaiveDate> {
+            e.date.as_ref().and_then(|d| match d {
+                EventDate::Exact(nd)
+                | EventDate::Approximate(nd)
+                | EventDate::Before(nd)
+                | EventDate::After(nd)
+                | EventDate::Between(nd, _) => Some(*nd),
+                EventDate::Unknown => None,
+            })
+        };
+        match (key(a), key(b)) {
+            (Some(da), Some(db)) => da.cmp(&db),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+
+    for e in &events {
+        let date_str = e
+            .date
+            .as_ref()
+            .map(|d| d.to_string().yellow().to_string())
+            .unwrap_or_else(|| "undated".bright_black().to_string());
+        let place_str = e
+            .place_id
+            .as_ref()
+            .and_then(|pid| db.get_place(pid).ok())
+            .map(|pl| format!(" @ {}", pl.name.green()))
+            .unwrap_or_default();
+        let notes_str = e
+            .notes
+            .as_deref()
+            .map(|n| format!(" {}", format!("[{}]", n).bright_black()))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "  {:<12} {}{}{}\n",
+            e.event_type.to_string().bright_cyan(),
+            date_str,
+            place_str,
+            notes_str
+        ));
     }
 
     out.push('\n');

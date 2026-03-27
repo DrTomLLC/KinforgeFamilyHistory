@@ -2,7 +2,6 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::SourceId;
 
 #[derive(Subcommand)]
 pub enum SourceCommands {
@@ -103,7 +102,7 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
         }
 
         SourceCommands::Show { id } => {
-            let sid = SourceId::from_str(&id)?;
+            let sid = app.resolve_source_id(&id)?;
             let s = app.get_source(&sid)?;
             println!("{} {}", "ID:         ".cyan(), s.id.to_string().bright_black());
             println!("{} {}", "Title:      ".cyan(), s.title.bold());
@@ -132,7 +131,7 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
             year,
             notes,
         } => {
-            let sid = SourceId::from_str(&id)?;
+            let sid = app.resolve_source_id(&id)?;
             let mut source = app.get_source(&sid)?;
             if let Some(t) = title {
                 source.title = t;
@@ -158,7 +157,7 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
         }
 
         SourceCommands::Delete { id } => {
-            let sid = SourceId::from_str(&id)?;
+            let sid = app.resolve_source_id(&id)?;
             app.delete_source(&sid)?;
             println!(
                 "{} {}",

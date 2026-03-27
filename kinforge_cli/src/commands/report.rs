@@ -2,9 +2,9 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::PersonId;
 use kinforge_reports::{
     ancestor_report, descendant_report, family_group_sheet, individual_report, people_list_report,
+    timeline_report,
 };
 use kinforge_viz::ascii_family_tree;
 
@@ -36,6 +36,8 @@ pub enum ReportCommands {
     },
     /// Family Group Sheet (subject + spouse(s) + children)
     Family { id: String },
+    /// Chronological timeline of all events for a person
+    Timeline { id: String },
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -71,24 +73,28 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
             print!("{}", people_list_report(&app.db)?);
         }
         ReportCommands::Individual { id } => {
-            let pid = PersonId::from_str(&id)?;
+            let pid = app.resolve_person_id(&id)?;
             print!("{}", individual_report(&app.db, &pid)?);
         }
         ReportCommands::Ancestors { id, generations } => {
-            let pid = PersonId::from_str(&id)?;
+            let pid = app.resolve_person_id(&id)?;
             print!("{}", ancestor_report(&app.db, &pid, generations)?);
         }
         ReportCommands::Descendants { id, generations } => {
-            let pid = PersonId::from_str(&id)?;
+            let pid = app.resolve_person_id(&id)?;
             print!("{}", descendant_report(&app.db, &pid, generations)?);
         }
         ReportCommands::Tree { id, depth } => {
-            let pid = PersonId::from_str(&id)?;
+            let pid = app.resolve_person_id(&id)?;
             print!("{}", ascii_family_tree(&app.db, &pid, depth)?);
         }
         ReportCommands::Family { id } => {
-            let pid = PersonId::from_str(&id)?;
+            let pid = app.resolve_person_id(&id)?;
             print!("{}", family_group_sheet(&app.db, &pid)?);
+        }
+        ReportCommands::Timeline { id } => {
+            let pid = app.resolve_person_id(&id)?;
+            print!("{}", timeline_report(&app.db, &pid)?);
         }
     }
     Ok(())

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{PersonId, RelationshipId, RelationshipType};
+use kinforge_core::models::RelationshipType;
 
 #[derive(Subcommand)]
 pub enum RelationshipCommands {
@@ -40,8 +40,8 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
             person2,
             notes,
         } => {
-            let p1 = PersonId::from_str(&person1)?;
-            let p2 = PersonId::from_str(&person2)?;
+            let p1 = app.resolve_person_id(&person1)?;
+            let p2 = app.resolve_person_id(&person2)?;
             let rt: RelationshipType = rel_type.parse()?;
             let rel = app.add_relationship(rt, p1, p2, notes.as_deref())?;
             println!(
@@ -53,7 +53,7 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
         }
 
         RelationshipCommands::Show { id } => {
-            let rid = RelationshipId::from_str(&id)?;
+            let rid = app.resolve_relationship_id(&id)?;
             let rel = app.get_relationship(&rid)?;
             let p1_name = app
                 .get_person(&rel.person1_id)
@@ -83,7 +83,7 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
         }
 
         RelationshipCommands::List { person } => {
-            let pid = PersonId::from_str(&person)?;
+            let pid = app.resolve_person_id(&person)?;
             let rels = app.list_relationships_for_person(&pid)?;
             if rels.is_empty() {
                 println!("{}", "No relationships for this person.".bright_black());
@@ -133,7 +133,7 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
         }
 
         RelationshipCommands::Update { id, notes } => {
-            let rid = RelationshipId::from_str(&id)?;
+            let rid = app.resolve_relationship_id(&id)?;
             let mut rel = app.get_relationship(&rid)?;
             if let Some(n) = notes {
                 rel.notes = Some(n);
@@ -147,7 +147,7 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
         }
 
         RelationshipCommands::Delete { id } => {
-            let rid = RelationshipId::from_str(&id)?;
+            let rid = app.resolve_relationship_id(&id)?;
             app.delete_relationship(&rid)?;
             println!(
                 "{} {}",

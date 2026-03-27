@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{EventDate, EventId, EventType, PersonId, Place, PlaceId};
+use kinforge_core::models::{EventDate, EventType, Place, PlaceId};
 use kinforge_storage::Database;
 
 #[derive(Subcommand)]
@@ -106,7 +106,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             place,
             notes,
         } => {
-            let pid = PersonId::from_str(&person)?;
+            let pid = app.resolve_person_id(&person)?;
             let etype: EventType = event_type
                 .parse()
                 .unwrap_or(EventType::Other(event_type.clone()));
@@ -126,7 +126,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
         }
 
         EventCommands::List { person } => {
-            let pid = PersonId::from_str(&person)?;
+            let pid = app.resolve_person_id(&person)?;
             let events = app.list_events_for_person(&pid)?;
             if events.is_empty() {
                 println!("{}", "No events for this person.".bright_black());
@@ -160,7 +160,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
         }
 
         EventCommands::Show { id } => {
-            let eid = EventId::from_str(&id)?;
+            let eid = app.resolve_event_id(&id)?;
             let e = app.get_event(&eid)?;
             println!("{} {}", "ID:   ".cyan(), e.id.to_string().bright_black());
             println!("{} {}", "Type: ".cyan(), e.event_type.to_string().bright_cyan());
@@ -204,7 +204,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             place,
             notes,
         } => {
-            let eid = EventId::from_str(&id)?;
+            let eid = app.resolve_event_id(&id)?;
             let mut event = app.get_event(&eid)?;
             if let Some(ref d) = date {
                 event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
@@ -224,7 +224,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
         }
 
         EventCommands::Delete { id } => {
-            let eid = EventId::from_str(&id)?;
+            let eid = app.resolve_event_id(&id)?;
             app.delete_event(&eid)?;
             println!(
                 "{} {}",

@@ -26,7 +26,7 @@ pub fn handle(cmd: ImportCommands, app: &Application) -> Result<()> {
             let content = std::fs::read_to_string(&input)?;
             let stats = import_gedcom(&content, &app.db)?;
             println!(
-                "{} {} {} {}, {} {}",
+                "{} {} {} {}, {}, {}",
                 "Imported GEDCOM from".green().bold(),
                 input.bold(),
                 "\u{2014}".bright_black(),
@@ -34,6 +34,13 @@ pub fn handle(cmd: ImportCommands, app: &Application) -> Result<()> {
                 format!("{} sources", stats.sources).bold(),
                 "added".bright_black()
             );
+            if stats.duplicates_skipped > 0 {
+                println!(
+                    "  {} {}",
+                    format!("{} duplicate(s) skipped", stats.duplicates_skipped).yellow(),
+                    "(same name + birth year already exists)".bright_black()
+                );
+            }
         }
         ImportCommands::Json { input } => {
             let file = File::open(&input)?;

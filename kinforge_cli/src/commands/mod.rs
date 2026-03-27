@@ -1,3 +1,4 @@
+pub mod check;
 pub mod citation;
 pub mod event;
 pub mod export;

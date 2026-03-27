@@ -84,6 +84,9 @@ enum Commands {
 
     /// Print the active configuration and data paths
     Config,
+
+    /// Run data integrity checks and report issues
+    Check,
 }
 
 fn main() -> Result<()> {
@@ -157,6 +160,7 @@ fn main() -> Result<()> {
         Commands::Export(cmd) => commands::export::handle(cmd, &app)?,
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
+        Commands::Check => commands::check::handle(&app)?,
         Commands::Config => unreachable!(),
     }
 

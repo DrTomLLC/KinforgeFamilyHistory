@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{CitationId, ConfidenceLevel, EventId, SourceId};
+use kinforge_core::models::ConfidenceLevel;
 
 #[derive(Subcommand)]
 pub enum CitationCommands {
@@ -57,8 +57,8 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
             confidence,
             notes,
         } => {
-            let sid = SourceId::from_str(&source)?;
-            let eid = EventId::from_str(&event)?;
+            let sid = app.resolve_source_id(&source)?;
+            let eid = app.resolve_event_id(&event)?;
             let conf: ConfidenceLevel = confidence.parse()?;
             let citation = app.add_citation(sid, eid, page.as_deref(), conf, notes.as_deref())?;
             println!(
@@ -69,7 +69,7 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
         }
 
         CitationCommands::Show { id } => {
-            let cid = CitationId::from_str(&id)?;
+            let cid = app.resolve_citation_id(&id)?;
             let c = app.get_citation(&cid)?;
             let src = app
                 .get_source(&c.source_id)
@@ -94,7 +94,7 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
         }
 
         CitationCommands::List { event } => {
-            let eid = EventId::from_str(&event)?;
+            let eid = app.resolve_event_id(&event)?;
             let citations = app.list_citations_for_event(&eid)?;
             if citations.is_empty() {
                 println!("{}", "No citations for this event.".bright_black());
@@ -129,7 +129,7 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
             confidence,
             notes,
         } => {
-            let cid = CitationId::from_str(&id)?;
+            let cid = app.resolve_citation_id(&id)?;
             let mut citation = app.get_citation(&cid)?;
             if let Some(p) = page {
                 citation.page = Some(p);
@@ -149,7 +149,7 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
         }
 
         CitationCommands::Delete { id } => {
-            let cid = CitationId::from_str(&id)?;
+            let cid = app.resolve_citation_id(&id)?;
             app.delete_citation(&cid)?;
             println!(
                 "{} {}",

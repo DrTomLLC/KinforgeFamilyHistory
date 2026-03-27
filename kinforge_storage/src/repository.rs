@@ -224,6 +224,109 @@ impl Database {
         Ok(())
     }
 
+    /// Resolve a UUID prefix to a full Person.  Accepts any unambiguous leading
+    /// substring of a UUID (e.g. `"abc123"` or `"abc123-45"`).
+    pub fn find_person_by_id_prefix(&self, prefix: &str) -> KinforgeResult<Person> {
+        let matches = self.ids_matching_prefix("people", prefix)?;
+        self.resolve_prefix_match("Person", prefix, matches, |s| {
+            let pid = PersonId::from_str(s).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            self.get_person(&pid)
+        })
+    }
+
+    /// Resolve a UUID prefix to a full Event.
+    pub fn find_event_by_id_prefix(&self, prefix: &str) -> KinforgeResult<Event> {
+        let matches = self.ids_matching_prefix("events", prefix)?;
+        self.resolve_prefix_match("Event", prefix, matches, |s| {
+            let eid = EventId::from_str(s).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            self.get_event(&eid)
+        })
+    }
+
+    /// Resolve a UUID prefix to a full Place.
+    pub fn find_place_by_id_prefix(&self, prefix: &str) -> KinforgeResult<Place> {
+        let matches = self.ids_matching_prefix("places", prefix)?;
+        self.resolve_prefix_match("Place", prefix, matches, |s| {
+            let pid = PlaceId::from_str(s).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            self.get_place(&pid)
+        })
+    }
+
+    /// Resolve a UUID prefix to a full Relationship.
+    pub fn find_relationship_by_id_prefix(&self, prefix: &str) -> KinforgeResult<Relationship> {
+        let matches = self.ids_matching_prefix("relationships", prefix)?;
+        self.resolve_prefix_match("Relationship", prefix, matches, |s| {
+            let rid =
+                RelationshipId::from_str(s).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            self.get_relationship(&rid)
+        })
+    }
+
+    /// Resolve a UUID prefix to a full Source.
+    pub fn find_source_by_id_prefix(&self, prefix: &str) -> KinforgeResult<Source> {
+        let matches = self.ids_matching_prefix("sources", prefix)?;
+        self.resolve_prefix_match("Source", prefix, matches, |s| {
+            let sid = SourceId::from_str(s).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            self.get_source(&sid)
+        })
+    }
+
+    /// Resolve a UUID prefix to a full Citation.
+    pub fn find_citation_by_id_prefix(&self, prefix: &str) -> KinforgeResult<Citation> {
+        let matches = self.ids_matching_prefix("citations", prefix)?;
+        self.resolve_prefix_match("Citation", prefix, matches, |s| {
+            let cid =
+                CitationId::from_str(s).map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            self.get_citation(&cid)
+        })
+    }
+
+    // ── Internal prefix helpers ───────────────────────────────────────────────
+
+    /// Return all IDs from `table` whose `id` column starts with `prefix`.
+    /// Fetches at most 2 rows — enough to detect ambiguity without full scans.
+    fn ids_matching_prefix(&self, table: &str, prefix: &str) -> KinforgeResult<Vec<String>> {
+        // Table name is from our own code (not user input), safe to interpolate.
+        let sql = format!("SELECT id FROM {} WHERE id LIKE ?1 LIMIT 2", table);
+        let pattern = format!("{}%", prefix);
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let ids: Vec<String> = stmt
+            .query_map(params![pattern], |row| row.get(0))
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(ids)
+    }
+
+    fn resolve_prefix_match<T, F>(
+        &self,
+        entity_type: &str,
+        prefix: &str,
+        matches: Vec<String>,
+        fetch: F,
+    ) -> KinforgeResult<T>
+    where
+        F: Fn(&str) -> KinforgeResult<T>,
+    {
+        match matches.len() {
+            0 => Err(KinforgeError::NotFound {
+                entity_type: entity_type.to_string(),
+                id: prefix.to_string(),
+            }),
+            1 => fetch(&matches[0]),
+            _ => Err(KinforgeError::InvalidField {
+                field: "id".to_string(),
+                value: format!(
+                    "prefix '{}' is ambiguous — matches multiple {}s",
+                    prefix, entity_type
+                ),
+            }),
+        }
+    }
+
     // ── Events ───────────────────────────────────────────────────────────────
 
     pub fn insert_event(&self, event: &Event) -> KinforgeResult<()> {
