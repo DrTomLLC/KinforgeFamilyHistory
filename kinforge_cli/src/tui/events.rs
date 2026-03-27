@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use kinforge_core::models::{PersonId, SourceId, TaskId};
 
-use super::state::{first_task_item_idx, InputMode, SortOrder, Tab, TaskRow, TuiState};
+use super::state::{first_task_item_idx, InputMode, Tab, TaskRow, TuiState, TUI_EVENT_TYPES};
 
 pub enum Action {
     None,
@@ -16,6 +16,7 @@ pub enum Action {
     EditPerson(PersonId, String, String), // (id, given, surname)
     CreateSource(String, String),  // (title, author)
     DeletePerson(PersonId),
+    CreateEvent(PersonId, String, String, String), // (person_id, type_name, date_str, place_str)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -37,6 +38,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::PersonEdit => handle_person_edit(state, key),
         InputMode::SourceCreate => handle_source_create(state, key),
         InputMode::ConfirmDelete => handle_confirm_delete(state, key),
+        InputMode::EventCreate => handle_event_create(state, key),
     }
 }
 
@@ -252,6 +254,19 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
                 state.person_edit_field = 0;
                 state.person_edit_id = Some(pid);
                 state.mode = InputMode::PersonEdit;
+            }
+            Action::None
+        }
+
+        // Add event: press 'a' in People tab when detail is open
+        KeyCode::Char('a') if state.active_tab == Tab::People && state.detail_open => {
+            if let Some(pid) = state.detail_person_id.clone() {
+                state.event_create_type_idx = 0;
+                state.event_create_date.clear();
+                state.event_create_place.clear();
+                state.event_create_field = 0;
+                state.event_create_person_id = Some(pid);
+                state.mode = InputMode::EventCreate;
             }
             Action::None
         }
@@ -511,6 +526,55 @@ fn handle_source_create(state: &mut TuiState, key: KeyEvent) -> Action {
                 state.source_create_author.push(c);
             }
         }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_event_create(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.event_create_person_id = None;
+        }
+        KeyCode::Tab => {
+            state.event_create_field = (state.event_create_field + 1) % 3;
+        }
+        KeyCode::BackTab => {
+            state.event_create_field = (state.event_create_field + 2) % 3;
+        }
+        // Left/Right cycle event type when on field 0
+        KeyCode::Left if state.event_create_field == 0 => {
+            if state.event_create_type_idx == 0 {
+                state.event_create_type_idx = TUI_EVENT_TYPES.len() - 1;
+            } else {
+                state.event_create_type_idx -= 1;
+            }
+        }
+        KeyCode::Right if state.event_create_field == 0 => {
+            state.event_create_type_idx =
+                (state.event_create_type_idx + 1) % TUI_EVENT_TYPES.len();
+        }
+        KeyCode::Enter => {
+            let type_name = TUI_EVENT_TYPES[state.event_create_type_idx].to_string();
+            let date_str = state.event_create_date.trim().to_string();
+            let place_str = state.event_create_place.trim().to_string();
+            if let Some(pid) = state.event_create_person_id.take() {
+                state.mode = InputMode::Normal;
+                return Action::CreateEvent(pid, type_name, date_str, place_str);
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace => match state.event_create_field {
+            1 => { state.event_create_date.pop(); }
+            2 => { state.event_create_place.pop(); }
+            _ => {}
+        },
+        KeyCode::Char(c) => match state.event_create_field {
+            1 => { state.event_create_date.push(c); }
+            2 => { state.event_create_place.push(c); }
+            _ => {}
+        },
         _ => {}
     }
     Action::None

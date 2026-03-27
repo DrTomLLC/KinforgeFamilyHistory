@@ -132,6 +132,24 @@ pub fn individual_report(db: &Database, person_id: &PersonId) -> KinforgeResult<
         }
     }
 
+    // Research Tasks linked to this person
+    let tasks = db.list_tasks_for_person(person_id).unwrap_or_default();
+    if !tasks.is_empty() {
+        out.push_str(&format!("\n{}\n", "Research Tasks:".cyan().bold()));
+        for task in &tasks {
+            let status_marker = match task.status {
+                TaskStatus::Pending => "[ ]".bright_black(),
+                TaskStatus::InProgress => "[~]".yellow(),
+                TaskStatus::Done => "[✓]".green(),
+            };
+            out.push_str(&format!(
+                "  {} {}\n",
+                status_marker,
+                task.description.bold()
+            ));
+        }
+    }
+
     out.push('\n');
     Ok(out)
 }

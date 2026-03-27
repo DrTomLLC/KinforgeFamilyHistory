@@ -9,7 +9,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use kinforge_app::Application;
-use kinforge_core::models::{RelationshipType, TaskPriority};
+use kinforge_core::models::{EventDate, EventType, RelationshipType, TaskPriority};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, time::Duration};
 
@@ -131,6 +131,21 @@ fn run(
                             state.detail_person_id = None;
                         }
                         state.reload_people(app);
+                    }
+
+                    events::Action::CreateEvent(pid, type_name, date_str, place_str) => {
+                        let event_type: EventType = type_name.parse().unwrap_or(EventType::Other(type_name));
+                        let date = if date_str.is_empty() {
+                            None
+                        } else {
+                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                .ok()
+                                .map(EventDate::Exact)
+                        };
+                        let place = if place_str.is_empty() { None } else { Some(place_str.as_str()) };
+                        let _ = app.add_event(pid.clone(), event_type, date, place, None);
+                        // Refresh detail panel
+                        state.detail_events = app.list_events_for_person(&pid).unwrap_or_default();
                     }
 
                     events::Action::None => {}

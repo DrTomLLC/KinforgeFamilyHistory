@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{InputMode, SortOrder, Tab, TaskRow, TuiState};
+use super::state::{InputMode, Tab, TaskRow, TuiState, TUI_EVENT_TYPES};
 use kinforge_core::models::{TaskPriority, TaskStatus};
 
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -82,6 +82,9 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     }
     if state.mode == InputMode::ConfirmDelete {
         draw_confirm_delete_popup(frame, state, area);
+    }
+    if state.mode == InputMode::EventCreate {
+        draw_event_create_popup(frame, state, area);
     }
 }
 
@@ -196,6 +199,64 @@ fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
             .borders(Borders::ALL)
             .title(" New Person — Tab: switch · Enter: save · Esc: cancel ")
             .border_style(Style::default().fg(Color::Green)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_event_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 58_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 7 };
+
+    let type_name = TUI_EVENT_TYPES[state.event_create_type_idx];
+    let type_text = if state.event_create_field == 0 {
+        format!("◄ {} ►", type_name)
+    } else {
+        type_name.to_string()
+    };
+
+    let cursor = "_";
+    let date_text = if state.event_create_field == 1 {
+        format!("{}{}", state.event_create_date, cursor)
+    } else {
+        state.event_create_date.clone()
+    };
+    let place_text = if state.event_create_field == 2 {
+        format!("{}{}", state.event_create_place, cursor)
+    } else {
+        state.event_create_place.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Type:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(type_text, if state.event_create_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("          ←/→ cycle types", Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Date:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(date_text, if state.event_create_field == 1 { active } else { inactive }),
+            Span::styled(" (YYYY-MM-DD, optional)", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Place:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(place_text, if state.event_create_field == 2 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Add Event — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Cyan)),
     );
 
     frame.render_widget(Clear, popup_area);
@@ -776,10 +837,11 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::PersonEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::SourceCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::ConfirmDelete => " y: confirm delete  any other key: cancel".to_string(),
+        InputMode::EventCreate => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
-                    " ESC/Enter: close  ↑↓/jk: scroll  e: edit name  Tab: next  q: quit".to_string()
+                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  e: edit name  Tab: next  q: quit".to_string()
                 } else {
                     " Tab: next  ↑↓/jk  g/G  n: new  e: edit  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()

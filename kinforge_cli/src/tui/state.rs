@@ -41,6 +41,13 @@ impl Tab {
 
 // ── InputMode ─────────────────────────────────────────────────────────────────
 
+/// Ordered list of event types available in the TUI add-event popup.
+pub const TUI_EVENT_TYPES: &[&str] = &[
+    "Birth", "Death", "Marriage", "Divorce", "Baptism", "Burial",
+    "Residence", "Occupation", "Census", "Military",
+    "Emigration", "Immigration", "Naturalization", "Education",
+];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
@@ -50,6 +57,7 @@ pub enum InputMode {
     PersonEdit,
     SourceCreate,
     ConfirmDelete,
+    EventCreate,
 }
 
 // ── SortOrder ─────────────────────────────────────────────────────────────────
@@ -171,6 +179,13 @@ pub struct TuiState {
     pub source_create_title: String,
     pub source_create_author: String,
     pub source_create_field: u8, // 0 = title, 1 = author
+
+    // Inline event creation (from person detail panel)
+    pub event_create_type_idx: usize,   // index into TUI_EVENT_TYPES
+    pub event_create_date: String,      // YYYY-MM-DD or empty
+    pub event_create_place: String,
+    pub event_create_field: u8,         // 0 = type, 1 = date, 2 = place
+    pub event_create_person_id: Option<PersonId>,
 }
 
 impl TuiState {
@@ -258,6 +273,11 @@ impl TuiState {
             source_create_title: String::new(),
             source_create_author: String::new(),
             source_create_field: 0,
+            event_create_type_idx: 0,
+            event_create_date: String::new(),
+            event_create_place: String::new(),
+            event_create_field: 0,
+            event_create_person_id: None,
         })
     }
 
