@@ -19,4 +19,5 @@ kinforge_import_export = { workspace = true }
 kinforge_query = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+chrono = { workspace = true }
 colored = { workspace = true }

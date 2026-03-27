@@ -35,6 +35,11 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])?;
     }
 
+    if version < 4 {
+        conn.execute_batch(MIGRATION_4)?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])?;
+    }
+
     Ok(())
 }
 
@@ -139,4 +144,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
     entity_id   UNINDEXED,
     tokenize    = 'unicode61'
 );
+";
+
+const MIGRATION_4: &str = "
+CREATE TABLE IF NOT EXISTS research_tasks (
+    id          TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    person_id   TEXT REFERENCES people(id) ON DELETE SET NULL,
+    priority    TEXT NOT NULL DEFAULT 'Medium',
+    status      TEXT NOT NULL DEFAULT 'Pending',
+    notes       TEXT,
+    created     TEXT NOT NULL,
+    updated     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_person_id ON research_tasks(person_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON research_tasks(status);
 ";

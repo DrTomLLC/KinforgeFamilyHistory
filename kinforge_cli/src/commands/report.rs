@@ -1,17 +1,24 @@
 use anyhow::Result;
+use chrono::Datelike;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
+use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
     ancestor_report, descendant_report, family_group_sheet, individual_report, narrative_report,
     people_list_report, sources_report, timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
+use std::collections::HashMap;
 
 #[derive(Subcommand)]
 pub enum ReportCommands {
     /// Database statistics
-    Stats,
+    Stats {
+        /// Show detailed breakdown (decade histogram + top surnames)
+        #[arg(long)]
+        detailed: bool,
+    },
     /// List all people
     People,
     /// Full individual summary
@@ -52,7 +59,7 @@ pub enum ReportCommands {
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
     match cmd {
-        ReportCommands::Stats => {
+        ReportCommands::Stats { detailed } => {
             let s = app.stats()?;
             println!(
                 "{}\n",
@@ -78,6 +85,68 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
                 "Database:".cyan(),
                 app.config.database_path.display().to_string().bright_black()
             );
+
+            if detailed {
+                // ── Birth decade histogram ────────────────────────────────────
+                let people = app.list_people()?;
+                let mut decade_counts: HashMap<i32, u32> = HashMap::new();
+                let mut surname_counts: HashMap<String, u32> = HashMap::new();
+
+                for p in &people {
+                    // Surname tally
+                    if let Some(sn) = p.names.first().and_then(|n| n.surname.as_deref()) {
+                        if !sn.is_empty() {
+                            *surname_counts.entry(sn.to_string()).or_insert(0) += 1;
+                        }
+                    }
+
+                    // Birth decade
+                    let events = app.list_events_for_person(&p.id).unwrap_or_default();
+                    if let Some(birth_year) = events
+                        .iter()
+                        .find(|e| matches!(e.event_type, EventType::Birth))
+                        .and_then(|e| e.date.as_ref())
+                        .and_then(|d| match d {
+                            EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                            _ => None,
+                        })
+                    {
+                        let decade = (birth_year / 10) * 10;
+                        *decade_counts.entry(decade).or_insert(0) += 1;
+                    }
+                }
+
+                if !decade_counts.is_empty() {
+                    println!("\n  {}", "Birth Decade Histogram:".bold().cyan());
+                    let mut decades: Vec<i32> = decade_counts.keys().cloned().collect();
+                    decades.sort_unstable();
+                    let max_count = *decade_counts.values().max().unwrap_or(&1);
+                    for decade in &decades {
+                        let count = decade_counts[decade];
+                        let bar_len = (count as usize * 30) / max_count as usize;
+                        let bar = "\u{2588}".repeat(bar_len);
+                        println!(
+                            "  {:>5}s  {} {}",
+                            decade,
+                            bar.yellow(),
+                            count.to_string().bright_black()
+                        );
+                    }
+                }
+
+                if !surname_counts.is_empty() {
+                    println!("\n  {}", "Top Surnames:".bold().cyan());
+                    let mut surnames: Vec<(&String, &u32)> = surname_counts.iter().collect();
+                    surnames.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+                    for (surname, count) in surnames.iter().take(10) {
+                        println!(
+                            "  {:>4}  {}",
+                            count.to_string().yellow().bold(),
+                            surname.bold()
+                        );
+                    }
+                }
+            }
         }
         ReportCommands::People => {
             print!("{}", people_list_report(&app.db)?);

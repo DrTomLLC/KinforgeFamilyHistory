@@ -1284,6 +1284,140 @@ impl Database {
             entity_id: row.get(3)?,
         })
     }
+
+    // ── Research Tasks ───────────────────────────────────────────────────────
+
+    pub fn insert_task(&self, task: &Task) -> KinforgeResult<()> {
+        self.conn
+            .execute(
+                "INSERT INTO research_tasks
+                 (id, description, person_id, priority, status, notes, created, updated)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    task.id.as_str(),
+                    task.description,
+                    task.person_id.as_ref().map(|p| p.as_str()),
+                    task.priority.to_string(),
+                    task.status.to_string(),
+                    task.notes,
+                    task.created,
+                    task.updated,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_task(&self, task: &Task) -> KinforgeResult<()> {
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE research_tasks
+                 SET description=?2, person_id=?3, priority=?4, status=?5,
+                     notes=?6, updated=?7
+                 WHERE id=?1",
+                params![
+                    task.id.as_str(),
+                    task.description,
+                    task.person_id.as_ref().map(|p| p.as_str()),
+                    task.priority.to_string(),
+                    task.status.to_string(),
+                    task.notes,
+                    task.updated,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        if affected == 0 {
+            return Err(KinforgeError::NotFound {
+                entity_type: "Task".to_string(),
+                id: task.id.as_str(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn delete_task(&self, id: &TaskId) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM research_tasks WHERE id=?1", params![id.as_str()])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_task(&self, id: &TaskId) -> KinforgeResult<Task> {
+        self.conn
+            .query_row(
+                "SELECT id,description,person_id,priority,status,notes,created,updated
+                 FROM research_tasks WHERE id=?1",
+                params![id.as_str()],
+                Self::row_to_task,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => KinforgeError::NotFound {
+                    entity_type: "Task".to_string(),
+                    id: id.as_str(),
+                },
+                other => KinforgeError::Storage(other.to_string()),
+            })
+    }
+
+    pub fn list_tasks(&self) -> KinforgeResult<Vec<Task>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id,description,person_id,priority,status,notes,created,updated
+                 FROM research_tasks
+                 ORDER BY CASE status WHEN 'InProgress' THEN 0 WHEN 'Pending' THEN 1 ELSE 2 END,
+                          CASE priority WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END,
+                          created",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], Self::row_to_task)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    pub fn list_tasks_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Task>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id,description,person_id,priority,status,notes,created,updated
+                 FROM research_tasks WHERE person_id=?1
+                 ORDER BY created",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![person_id.as_str()], Self::row_to_task)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+        let priority: TaskPriority = row
+            .get::<_, String>(3)?
+            .parse()
+            .unwrap_or(TaskPriority::Medium);
+        let status: TaskStatus = row
+            .get::<_, String>(4)?
+            .parse()
+            .unwrap_or(TaskStatus::Pending);
+        let person_id_str: Option<String> = row.get(2)?;
+        let person_id = person_id_str
+            .as_deref()
+            .and_then(|s| PersonId::from_str(s).ok());
+        Ok(Task {
+            id: TaskId::from_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+            description: row.get(1)?,
+            person_id,
+            priority,
+            status,
+            notes: row.get(5)?,
+            created: row.get(6)?,
+            updated: row.get(7)?,
+        })
+    }
 }
 
 // ── Row helpers ───────────────────────────────────────────────────────────────

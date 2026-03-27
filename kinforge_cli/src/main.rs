@@ -10,6 +10,7 @@ use commands::{
     export::ExportCommands, import::ImportCommands, media::MediaCommands,
     person::PersonCommands, place::PlaceCommands, relationship::RelationshipCommands,
     report::ReportCommands, search::SearchCommands, source::SourceCommands,
+    task::TaskCommands,
 };
 
 #[derive(Parser)]
@@ -89,6 +90,17 @@ enum Commands {
     #[command(subcommand)]
     Config(ConfigCommands),
 
+    /// Manage research tasks
+    #[command(subcommand)]
+    Task(TaskCommands),
+
+    /// Show upcoming birthdays and anniversaries
+    Reminders {
+        /// Days ahead to look (default: 30)
+        #[arg(long, default_value = "30")]
+        days: u32,
+    },
+
     /// Run data integrity checks and report issues
     Check,
 }
@@ -127,6 +139,8 @@ fn main() -> Result<()> {
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
         Commands::Media(cmd) => commands::media::handle(cmd, &app)?,
+        Commands::Task(cmd) => commands::task::handle(cmd, &app)?,
+        Commands::Reminders { days } => commands::reminders::handle(days, &app)?,
         Commands::Check => commands::check::handle(&app)?,
         Commands::Config(_) => unreachable!(),
     }

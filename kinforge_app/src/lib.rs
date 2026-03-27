@@ -1031,6 +1031,78 @@ fn describe_path_rel(rt: &RelationshipType, dir: &RelationshipDirection) -> Stri
     }
 }
 
+// ── Research Tasks ────────────────────────────────────────────────────────────
+
+impl Application {
+    pub fn add_task(
+        &self,
+        description: &str,
+        person_id: Option<PersonId>,
+        priority: TaskPriority,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Task> {
+        let mut t = Task::new(description);
+        t.person_id = person_id;
+        t.priority = priority;
+        t.notes = notes.map(|s| s.to_string());
+        self.db.insert_task(&t)?;
+        Ok(t)
+    }
+
+    pub fn get_task(&self, id: &TaskId) -> KinforgeResult<Task> {
+        self.db.get_task(id)
+    }
+
+    pub fn update_task(&self, task: Task) -> KinforgeResult<Task> {
+        self.db.update_task(&task)?;
+        Ok(task)
+    }
+
+    pub fn delete_task(&self, id: &TaskId) -> KinforgeResult<()> {
+        self.db.delete_task(id)
+    }
+
+    pub fn list_tasks(&self) -> KinforgeResult<Vec<Task>> {
+        self.db.list_tasks()
+    }
+
+    pub fn list_tasks_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Task>> {
+        self.db.list_tasks_for_person(person_id)
+    }
+
+    /// Mark a task as Done and touch its updated timestamp.
+    pub fn complete_task(&self, id: &TaskId) -> KinforgeResult<Task> {
+        let mut t = self.db.get_task(id)?;
+        t.status = TaskStatus::Done;
+        t.touch();
+        self.db.update_task(&t)?;
+        Ok(t)
+    }
+
+    /// Resolve a task ID from a full UUID or unambiguous short prefix.
+    pub fn resolve_task_id(&self, input: &str) -> KinforgeResult<TaskId> {
+        if let Ok(id) = TaskId::from_str(input) {
+            return Ok(id);
+        }
+        let all = self.db.list_tasks()?;
+        let matches: Vec<_> = all
+            .iter()
+            .filter(|t| t.id.as_str().starts_with(input))
+            .collect();
+        match matches.len() {
+            1 => Ok(matches[0].id.clone()),
+            0 => Err(KinforgeError::NotFound {
+                entity_type: "Task".to_string(),
+                id: input.to_string(),
+            }),
+            _ => Err(KinforgeError::InvalidField {
+                field: "task_id".to_string(),
+                value: format!("prefix '{}' is ambiguous ({} matches)", input, matches.len()),
+            }),
+        }
+    }
+}
+
 // ── Backup ────────────────────────────────────────────────────────────────────
 
 fn create_backup(config: &Config) -> KinforgeResult<()> {

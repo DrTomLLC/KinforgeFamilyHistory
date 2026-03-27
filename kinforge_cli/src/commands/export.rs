@@ -30,6 +30,11 @@ pub enum ExportCommands {
         /// Output file path (e.g. family.html)
         output: String,
     },
+    /// Export places with coordinates as GeoJSON
+    Geojson {
+        /// Output file path (e.g. places.geojson)
+        output: String,
+    },
 }
 
 pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
@@ -136,6 +141,35 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
                 "Exported HTML \u{2192}".green().bold(),
                 output.bold(),
                 format!("({} people, {} bytes)", people.len(), html.len()).bright_black()
+            );
+        }
+
+        ExportCommands::Geojson { output } => {
+            let places = app.list_places()?;
+            let features: Vec<String> = places
+                .iter()
+                .filter_map(|p| {
+                    let lat = p.latitude?;
+                    let lon = p.longitude?;
+                    Some(format!(
+                        "    {{\"type\":\"Feature\",\"geometry\":{{\"type\":\"Point\",\"coordinates\":[{lon},{lat}]}},\"properties\":{{\"id\":\"{id}\",\"name\":\"{name}\"}}}}",
+                        lon = lon,
+                        lat = lat,
+                        id = p.id,
+                        name = p.name.replace('"', "\\\""),
+                    ))
+                })
+                .collect();
+            let geojson = format!(
+                "{{\n  \"type\": \"FeatureCollection\",\n  \"features\": [\n{}\n  ]\n}}\n",
+                features.join(",\n")
+            );
+            std::fs::write(&output, &geojson)?;
+            println!(
+                "{} {} {}",
+                "Exported GeoJSON \u{2192}".green().bold(),
+                output.bold(),
+                format!("({} places with coordinates)", features.len()).bright_black()
             );
         }
     }

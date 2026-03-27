@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "kinforge_config",
@@ -352,9 +352,10 @@ dependencies = [
 
 [[package]]
 name = "kinforge_cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "colored",
  "kinforge_app",
@@ -369,7 +370,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_config"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kinforge_core",
  "serde",
@@ -379,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "serde",
@@ -389,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_import_export"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "kinforge_core",
@@ -401,14 +402,14 @@ dependencies = [
 
 [[package]]
 name = "kinforge_plugin_api"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kinforge_core",
 ]
 
 [[package]]
 name = "kinforge_query"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "kinforge_core",
@@ -418,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_reports"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "colored",
@@ -428,7 +429,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_storage"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "kinforge_core",
@@ -441,14 +442,14 @@ dependencies = [
 
 [[package]]
 name = "kinforge_sync"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kinforge_core",
 ]
 
 [[package]]
 name = "kinforge_ui_desktop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kinforge_app",
  "kinforge_core",
@@ -456,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "kinforge_viz"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "colored",
  "kinforge_core",

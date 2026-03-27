@@ -1021,3 +1021,91 @@ fn html_export_renders() {
     assert!(html.contains("Higher Bockhampton"));
     assert!(html.len() > 500);
 }
+
+// ── Phase 8: Research Tasks ───────────────────────────────────────────────────
+
+#[test]
+fn task_add_and_get() {
+    let a = app();
+    let t = a.add_task("Find baptism record", None, TaskPriority::High, None).unwrap();
+    assert_eq!(t.description, "Find baptism record");
+    assert_eq!(t.priority, TaskPriority::High);
+    assert_eq!(t.status, TaskStatus::Pending);
+
+    let fetched = a.get_task(&t.id).unwrap();
+    assert_eq!(fetched.id, t.id);
+    assert_eq!(fetched.description, "Find baptism record");
+}
+
+#[test]
+fn task_list_and_filter() {
+    let a = app();
+    a.add_task("Task A", None, TaskPriority::Low, None).unwrap();
+    a.add_task("Task B", None, TaskPriority::High, None).unwrap();
+    a.add_task("Task C", None, TaskPriority::Medium, None).unwrap();
+
+    let all = a.list_tasks().unwrap();
+    assert_eq!(all.len(), 3);
+}
+
+#[test]
+fn task_complete() {
+    let a = app();
+    let t = a.add_task("Verify marriage date", None, TaskPriority::Medium, None).unwrap();
+    let done = a.complete_task(&t.id).unwrap();
+    assert_eq!(done.status, TaskStatus::Done);
+}
+
+#[test]
+fn task_update() {
+    let a = app();
+    let mut t = a.add_task("Initial description", None, TaskPriority::Low, None).unwrap();
+    t.description = "Updated description".to_string();
+    t.priority = TaskPriority::High;
+    t.touch();
+    let updated = a.update_task(t).unwrap();
+    assert_eq!(updated.description, "Updated description");
+    assert_eq!(updated.priority, TaskPriority::High);
+}
+
+#[test]
+fn task_link_to_person() {
+    let a = app();
+    let p = a.add_person(Some("Jane"), Some("Doe"), Sex::Female, None).unwrap();
+    let t = a.add_task("Find Jane's birth record", Some(p.id.clone()), TaskPriority::High, None).unwrap();
+    assert_eq!(t.person_id, Some(p.id.clone()));
+
+    let tasks_for_person = a.list_tasks_for_person(&p.id).unwrap();
+    assert_eq!(tasks_for_person.len(), 1);
+    assert_eq!(tasks_for_person[0].id, t.id);
+}
+
+#[test]
+fn task_delete() {
+    let a = app();
+    let t = a.add_task("Temporary task", None, TaskPriority::Low, None).unwrap();
+    assert!(a.get_task(&t.id).is_ok());
+    a.delete_task(&t.id).unwrap();
+    assert!(a.get_task(&t.id).is_err());
+}
+
+#[test]
+fn task_resolve_by_prefix() {
+    let a = app();
+    let t = a.add_task("Prefix lookup test", None, TaskPriority::Medium, None).unwrap();
+    let prefix = &t.id.to_string()[..8];
+    let resolved = a.resolve_task_id(prefix).unwrap();
+    assert_eq!(resolved, t.id);
+}
+
+#[test]
+fn task_priority_ordering() {
+    let a = app();
+    a.add_task("Low task", None, TaskPriority::Low, None).unwrap();
+    a.add_task("High task", None, TaskPriority::High, None).unwrap();
+    a.add_task("Med task", None, TaskPriority::Medium, None).unwrap();
+
+    let tasks = a.list_tasks().unwrap();
+    // High should come first (sorted by priority desc within same status)
+    assert_eq!(tasks[0].priority, TaskPriority::High);
+}
