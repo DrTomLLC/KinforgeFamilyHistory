@@ -9,6 +9,17 @@ use crate::migrations::run_migrations;
 /// Column tuple returned by relationship SQL queries.
 type RelRow = (String, String, String, String, Option<String>);
 
+/// A single result from a full-text search.
+#[derive(Debug, Clone)]
+pub struct FtsResult {
+    /// The entity class: "person", "event", "source", or "place"
+    pub entity_type: String,
+    /// UUID of the matching entity
+    pub entity_id: String,
+    /// Context snippet from the matching body text (raw, no highlight markers)
+    pub snippet: String,
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -1004,6 +1015,98 @@ impl Database {
             relationships,
             places,
         })
+    }
+
+    // ── Full-text search (FTS5) ──────────────────────────────────────────────
+
+    /// Rebuild the FTS5 index from all current data. Fast for typical databases.
+    pub fn rebuild_fts_index(&self) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM fts_index", [])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Person names
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT TRIM(COALESCE(given,'') || ' ' || COALESCE(surname,'')),
+                        'person', person_id
+                 FROM person_names
+                 WHERE given IS NOT NULL OR surname IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Person notes
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT notes, 'person', id FROM people WHERE notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Event notes
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT notes, 'event', id FROM events WHERE notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Source titles + authors
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT TRIM(title || ' ' || COALESCE(author,'')), 'source', id FROM sources",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Source notes
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT notes, 'source', id FROM sources WHERE notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Place names
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT name, 'place', id FROM places",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Search all indexed text using FTS5. Rebuilds index before querying.
+    /// Returns results ordered by relevance (best match first).
+    pub fn search_fulltext(&self, query: &str) -> KinforgeResult<Vec<FtsResult>> {
+        self.rebuild_fts_index()?;
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT entity_type, entity_id, body
+                 FROM fts_index
+                 WHERE fts_index MATCH ?1
+                 ORDER BY rank
+                 LIMIT 100",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![query], |row| {
+                Ok(FtsResult {
+                    entity_type: row.get(0)?,
+                    entity_id: row.get(1)?,
+                    snippet: row.get(2)?,
+                })
+            })
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
     }
 
     // ── Media ────────────────────────────────────────────────────────────────

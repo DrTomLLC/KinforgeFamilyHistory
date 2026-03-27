@@ -62,6 +62,11 @@ pub enum SearchCommands {
         #[arg(long)]
         source: Option<String>,
     },
+    /// Full-text search across all names, notes, source titles, and place names
+    Fulltext {
+        /// Search query (FTS5 syntax: word, phrase "in quotes", prefix*, OR, NOT)
+        query: String,
+    },
 }
 
 pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
@@ -337,8 +342,86 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                 }
             }
         }
+
+        SearchCommands::Fulltext { query } => {
+            let results = app.search_fulltext(&query)?;
+            if results.is_empty() {
+                println!(
+                    "{} '{}'",
+                    "No results for".bright_black(),
+                    query.yellow()
+                );
+                return Ok(());
+            }
+            println!(
+                "{}\n",
+                format!("  {} result(s) for '{}' ", results.len(), query)
+                    .bold()
+                    .bright_cyan()
+                    .on_black()
+            );
+            for r in &results {
+                let entity_label = resolve_entity_label(app, &r.entity_type, &r.entity_id);
+                println!(
+                    "  {} {} {}",
+                    r.entity_type.cyan(),
+                    r.entity_id[..8].bright_black(),
+                    entity_label.bold()
+                );
+                let snippet = truncate_notes(&r.snippet, 100);
+                println!("    {}", snippet.bright_black());
+            }
+        }
     }
     Ok(())
+}
+
+fn resolve_entity_label(app: &Application, entity_type: &str, entity_id: &str) -> String {
+    match entity_type {
+        "person" => {
+            if let Ok(pid) = kinforge_core::models::PersonId::from_str(entity_id) {
+                app.get_person(&pid)
+                    .map(|p| p.display_name())
+                    .unwrap_or_else(|_| entity_id.to_string())
+            } else {
+                entity_id.to_string()
+            }
+        }
+        "event" => {
+            if let Ok(eid) = kinforge_core::models::EventId::from_str(entity_id) {
+                app.get_event(&eid)
+                    .map(|e| {
+                        let pname = app
+                            .get_person(&e.person_id)
+                            .map(|p| p.display_name())
+                            .unwrap_or_default();
+                        format!("{} — {}", pname, e.event_type)
+                    })
+                    .unwrap_or_else(|_| entity_id.to_string())
+            } else {
+                entity_id.to_string()
+            }
+        }
+        "source" => {
+            if let Ok(sid) = kinforge_core::models::SourceId::from_str(entity_id) {
+                app.get_source(&sid)
+                    .map(|s| s.title.clone())
+                    .unwrap_or_else(|_| entity_id.to_string())
+            } else {
+                entity_id.to_string()
+            }
+        }
+        "place" => {
+            if let Ok(pid) = kinforge_core::models::PlaceId::from_str(entity_id) {
+                app.get_place(&pid)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|_| entity_id.to_string())
+            } else {
+                entity_id.to_string()
+            }
+        }
+        _ => entity_id.to_string(),
+    }
 }
 
 fn fmt_confidence(conf: &kinforge_core::models::ConfidenceLevel) -> String {

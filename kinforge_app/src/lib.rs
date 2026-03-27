@@ -1,7 +1,7 @@
 use chrono::Local;
 use kinforge_config::Config;
 use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
-use kinforge_storage::{repository::DatabaseStats, Database};
+use kinforge_storage::{repository::DatabaseStats, Database, FtsResult};
 use std::path::Path;
 
 /// A single issue found during an integrity check.
@@ -847,6 +847,187 @@ impl Application {
                 value: format!("prefix '{}' is ambiguous ({} matches)", input, matches.len()),
             }),
         }
+    }
+
+    // ── Full-text search ──────────────────────────────────────────────────────
+
+    /// Search all text content (names, notes, source titles, place names) using FTS5.
+    /// Results are sorted by relevance (best match first).
+    pub fn search_fulltext(&self, query: &str) -> KinforgeResult<Vec<FtsResult>> {
+        self.db.search_fulltext(query)
+    }
+
+    // ── Relationship path finding ─────────────────────────────────────────────
+
+    /// BFS through the relationship graph to find the shortest path between two people.
+    /// Returns `None` if no connection exists.
+    pub fn find_relationship_path(
+        &self,
+        from_id: &PersonId,
+        to_id: &PersonId,
+    ) -> KinforgeResult<Option<RelationshipPath>> {
+        use std::collections::{HashMap, VecDeque};
+
+        if from_id == to_id {
+            let person = self.db.get_person(from_id)?;
+            return Ok(Some(RelationshipPath {
+                steps: vec![RelationshipStep {
+                    person,
+                    via_rel_type: None,
+                    direction: None,
+                }],
+            }));
+        }
+
+        // BFS state: entity_id_str -> (parent_id_str, rel_type, person1_was_current)
+        let mut parent: HashMap<String, (String, RelationshipType, bool)> = HashMap::new();
+        let mut queue: VecDeque<PersonId> = VecDeque::new();
+
+        parent.insert(from_id.as_str(), ("".to_string(), RelationshipType::Sibling, false));
+        queue.push_back(from_id.clone());
+        let mut found = false;
+
+        'bfs: while let Some(current) = queue.pop_front() {
+            let rels = self.db.list_relationships_for_person(&current)?;
+            for rel in rels {
+                let neighbor = if rel.person1_id == current {
+                    rel.person2_id.clone()
+                } else {
+                    rel.person1_id.clone()
+                };
+                let nkey = neighbor.as_str();
+                if parent.contains_key(&nkey) {
+                    continue;
+                }
+                parent.insert(
+                    nkey.clone(),
+                    (current.as_str(), rel.rel_type.clone(), rel.person1_id == current),
+                );
+                if neighbor == *to_id {
+                    found = true;
+                    break 'bfs;
+                }
+                queue.push_back(neighbor);
+            }
+        }
+
+        if !found {
+            return Ok(None);
+        }
+
+        // Reconstruct path: walk backwards from to_id to from_id
+        let mut path_ids: Vec<(String, Option<RelationshipType>, Option<bool>)> = Vec::new();
+        let mut current_key = to_id.as_str();
+        loop {
+            let (prev_key, rel_type, p1_was_prev) = parent.get(&current_key).unwrap();
+            if prev_key.is_empty() {
+                path_ids.push((current_key.clone(), None, None));
+                break;
+            }
+            path_ids.push((
+                current_key.clone(),
+                Some(rel_type.clone()),
+                Some(*p1_was_prev),
+            ));
+            current_key = prev_key.clone();
+        }
+        path_ids.reverse();
+
+        // Build RelationshipStep list
+        let mut steps: Vec<RelationshipStep> = Vec::new();
+        for (id_str, via_rel, p1_was_prev) in path_ids {
+            let pid = PersonId::from_str(&id_str)
+                .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            let person = self.db.get_person(&pid)?;
+            let direction = p1_was_prev.map(|was_p1| {
+                if was_p1 {
+                    RelationshipDirection::Person1ToPerson2
+                } else {
+                    RelationshipDirection::Person2ToPerson1
+                }
+            });
+            steps.push(RelationshipStep {
+                person,
+                via_rel_type: via_rel,
+                direction,
+            });
+        }
+
+        Ok(Some(RelationshipPath { steps }))
+    }
+}
+
+/// One step in a relationship path between two people.
+#[derive(Debug, Clone)]
+pub struct RelationshipStep {
+    pub person: Person,
+    /// The relationship that connected the previous step to this person (None for the start node)
+    pub via_rel_type: Option<RelationshipType>,
+    /// Whether the previous person was `person1` (→ person2) or `person2` (← person1)
+    pub direction: Option<RelationshipDirection>,
+}
+
+/// Direction of a relationship in a path step.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RelationshipDirection {
+    Person1ToPerson2,
+    Person2ToPerson1,
+}
+
+/// The complete path between two people through the relationship graph.
+#[derive(Debug, Clone)]
+pub struct RelationshipPath {
+    pub steps: Vec<RelationshipStep>,
+}
+
+impl RelationshipPath {
+    /// Describe each hop in human-readable form.
+    pub fn describe(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for (i, step) in self.steps.iter().enumerate() {
+            if i == 0 {
+                lines.push(step.person.display_name());
+            } else {
+                let rel_desc = if let (Some(ref rt), Some(ref dir)) =
+                    (&step.via_rel_type, &step.direction)
+                {
+                    describe_path_rel(rt, dir)
+                } else {
+                    "related to".to_string()
+                };
+                lines.push(format!("  └─ {} → {}", rel_desc, step.person.display_name()));
+            }
+        }
+        lines
+    }
+}
+
+fn describe_path_rel(rt: &RelationshipType, dir: &RelationshipDirection) -> String {
+    use RelationshipDirection::*;
+    match rt {
+        RelationshipType::ParentChild => match dir {
+            Person1ToPerson2 => "parent of".to_string(),
+            Person2ToPerson1 => "child of".to_string(),
+        },
+        RelationshipType::AdoptiveParent => match dir {
+            Person1ToPerson2 => "adoptive parent of".to_string(),
+            Person2ToPerson1 => "adoptive child of".to_string(),
+        },
+        RelationshipType::StepParent => match dir {
+            Person1ToPerson2 => "step-parent of".to_string(),
+            Person2ToPerson1 => "step-child of".to_string(),
+        },
+        RelationshipType::Godparent => match dir {
+            Person1ToPerson2 => "godparent of".to_string(),
+            Person2ToPerson1 => "godchild of".to_string(),
+        },
+        RelationshipType::Foster => match dir {
+            Person1ToPerson2 => "foster parent of".to_string(),
+            Person2ToPerson1 => "foster child of".to_string(),
+        },
+        RelationshipType::Spouse => "spouse of".to_string(),
+        RelationshipType::Sibling => "sibling of".to_string(),
+        RelationshipType::HalfSibling => "half-sibling of".to_string(),
     }
 }
 

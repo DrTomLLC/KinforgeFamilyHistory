@@ -1,4 +1,4 @@
 mod migrations;
 pub mod repository;
 
-pub use repository::Database;
+pub use repository::{Database, FtsResult};

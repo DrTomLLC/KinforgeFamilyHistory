@@ -30,6 +30,11 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])?;
     }
 
+    if version < 3 {
+        conn.execute_batch(MIGRATION_3)?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])?;
+    }
+
     Ok(())
 }
 
@@ -125,4 +130,13 @@ CREATE TABLE IF NOT EXISTS media_links (
 
 CREATE INDEX IF NOT EXISTS idx_media_links_media_id ON media_links(media_id);
 CREATE INDEX IF NOT EXISTS idx_media_links_entity ON media_links(entity_type, entity_id);
+";
+
+const MIGRATION_3: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
+    body,
+    entity_type UNINDEXED,
+    entity_id   UNINDEXED,
+    tokenize    = 'unicode61'
+);
 ";

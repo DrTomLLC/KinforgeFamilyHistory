@@ -4,6 +4,7 @@ use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_import_export::{export_gedcom, export_json};
+use kinforge_reports::html_export;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
@@ -22,6 +23,11 @@ pub enum ExportCommands {
     /// Export people list to CSV (id, name, sex, birth_year, death_year)
     Csv {
         /// Output file path
+        output: String,
+    },
+    /// Export all people as a self-contained single-file HTML document
+    Html {
+        /// Output file path (e.g. family.html)
         output: String,
     },
 }
@@ -118,6 +124,18 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
                 "Exported CSV \u{2192}".green().bold(),
                 output.bold(),
                 format!("({} people)", people.len()).bright_black()
+            );
+        }
+
+        ExportCommands::Html { output } => {
+            let html = html_export(&app.db)?;
+            std::fs::write(&output, &html)?;
+            let people = app.list_people()?;
+            println!(
+                "{} {} {}",
+                "Exported HTML \u{2192}".green().bold(),
+                output.bold(),
+                format!("({} people, {} bytes)", people.len(), html.len()).bright_black()
             );
         }
     }

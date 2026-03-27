@@ -894,3 +894,130 @@ fn narrative_report_renders() {
     assert!(report.contains("1847"));
     assert!(report.contains("1931"));
 }
+
+// ── Phase 7 tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn fts_fulltext_finds_person_name() {
+    let a = app();
+    a.add_person(Some("Fitzwilliam"), Some("Darcy"), Sex::Male, None)
+        .unwrap();
+    a.add_person(Some("Elizabeth"), Some("Bennet"), Sex::Female, None)
+        .unwrap();
+    let results = a.search_fulltext("Darcy").unwrap();
+    assert!(!results.is_empty(), "FTS should find Darcy");
+    assert!(results.iter().any(|r| r.entity_type == "person"));
+}
+
+#[test]
+fn fts_fulltext_finds_event_notes() {
+    let a = app();
+    let p = a.add_person(Some("Anne"), None, Sex::Female, None).unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        None,
+        None,
+        Some("born during a blizzard"),
+    )
+    .unwrap();
+    let results = a.search_fulltext("blizzard").unwrap();
+    assert!(!results.is_empty(), "FTS should find event notes");
+    assert!(results.iter().any(|r| r.entity_type == "event"));
+}
+
+#[test]
+fn fts_fulltext_finds_source_title() {
+    let a = app();
+    a.add_source("Vestry Baptism Register 1820", None, None, None, None, None)
+        .unwrap();
+    let results = a.search_fulltext("Vestry").unwrap();
+    assert!(!results.is_empty(), "FTS should find source title");
+    assert!(results.iter().any(|r| r.entity_type == "source"));
+}
+
+#[test]
+fn fts_returns_empty_for_no_match() {
+    let a = app();
+    a.add_person(Some("John"), Some("Smith"), Sex::Male, None)
+        .unwrap();
+    let results = a.search_fulltext("xyznonexistent999").unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn relationship_path_direct() {
+    let a = app();
+    let parent = a.add_person(Some("Mary"), None, Sex::Female, None).unwrap();
+    let child = a.add_person(Some("Tom"), None, Sex::Male, None).unwrap();
+    a.add_parent(child.id.clone(), parent.id.clone(), None)
+        .unwrap();
+    let path = a
+        .find_relationship_path(&parent.id, &child.id)
+        .unwrap()
+        .expect("should find path");
+    assert_eq!(path.steps.len(), 2);
+    assert_eq!(path.steps[0].person.id, parent.id);
+    assert_eq!(path.steps[1].person.id, child.id);
+}
+
+#[test]
+fn relationship_path_multi_hop() {
+    // Grandparent → Parent → Child  (2 hops)
+    let a = app();
+    let gp = a.add_person(Some("Grandpa"), None, Sex::Male, None).unwrap();
+    let par = a.add_person(Some("Parent"), None, Sex::Unknown, None).unwrap();
+    let child = a.add_person(Some("Child"), None, Sex::Unknown, None).unwrap();
+    a.add_parent(par.id.clone(), gp.id.clone(), None).unwrap();
+    a.add_parent(child.id.clone(), par.id.clone(), None).unwrap();
+
+    let path = a
+        .find_relationship_path(&gp.id, &child.id)
+        .unwrap()
+        .expect("should find path");
+    assert_eq!(path.steps.len(), 3);
+    assert_eq!(path.steps[2].person.id, child.id);
+}
+
+#[test]
+fn relationship_path_no_connection() {
+    let a = app();
+    let p1 = a.add_person(Some("Island"), Some("A"), Sex::Unknown, None).unwrap();
+    let p2 = a.add_person(Some("Island"), Some("B"), Sex::Unknown, None).unwrap();
+    let result = a.find_relationship_path(&p1.id, &p2.id).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn relationship_path_same_person() {
+    let a = app();
+    let p = a.add_person(Some("Solo"), None, Sex::Unknown, None).unwrap();
+    let path = a.find_relationship_path(&p.id, &p.id).unwrap().unwrap();
+    assert_eq!(path.steps.len(), 1);
+}
+
+#[test]
+fn html_export_renders() {
+    use kinforge_reports::html_export;
+    let a = app();
+    let p = a
+        .add_person(Some("Thomas"), Some("Hardy"), Sex::Male, None)
+        .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(
+            NaiveDate::from_ymd_opt(1840, 6, 2).unwrap(),
+        )),
+        Some("Higher Bockhampton"),
+        None,
+    )
+    .unwrap();
+
+    let html = html_export(&a.db).unwrap();
+    assert!(html.contains("<!DOCTYPE html>"));
+    assert!(html.contains("Thomas Hardy"));
+    assert!(html.contains("1840"));
+    assert!(html.contains("Higher Bockhampton"));
+    assert!(html.len() > 500);
+}
