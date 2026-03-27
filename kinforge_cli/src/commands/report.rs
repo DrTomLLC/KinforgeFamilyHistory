@@ -5,8 +5,9 @@ use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
-    ancestor_report, descendant_report, family_group_sheet, individual_report, narrative_report,
-    people_list_report, sources_report, timeline_report,
+    ancestor_report, descendant_report, family_group_sheet, global_timeline_report,
+    individual_report, narrative_report, people_list_report, places_report, sources_report,
+    summary_report, timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 use std::collections::HashMap;
@@ -55,6 +56,25 @@ pub enum ReportCommands {
     Sources,
     /// Prose narrative biography for a person
     Narrative { id: String },
+    /// All places with event counts, sorted by popularity
+    Places,
+    /// Compact database overview: counts, completeness, top surnames and event types
+    Summary,
+    /// Shortest relationship path between two people
+    Path {
+        /// Starting person (ID or prefix)
+        #[arg(long)]
+        from: String,
+        /// Ending person (ID or prefix)
+        #[arg(long)]
+        to: String,
+    },
+    /// Chronological timeline of all events across all people
+    GlobalTimeline {
+        /// Limit to this many events (default: 200)
+        #[arg(long, default_value = "200")]
+        limit: usize,
+    },
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -185,6 +205,42 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         ReportCommands::Narrative { id } => {
             let pid = app.resolve_person_id(&id)?;
             print!("{}", narrative_report(app.database(), &pid)?);
+        }
+        ReportCommands::Places => {
+            print!("{}", places_report(app.database())?);
+        }
+        ReportCommands::Summary => {
+            print!("{}", summary_report(app.database())?);
+        }
+        ReportCommands::Path { from, to } => {
+            let from_id = app.resolve_person_id(&from)?;
+            let to_id = app.resolve_person_id(&to)?;
+            match app.find_relationship_path(&from_id, &to_id)? {
+                None => {
+                    println!("{}", "No relationship path found between these two people.".bright_black());
+                }
+                Some(path) => {
+                    let from_name = app.get_person(&from_id).map(|p| p.display_name()).unwrap_or_default();
+                    let to_name = app.get_person(&to_id).map(|p| p.display_name()).unwrap_or_default();
+                    println!(
+                        "{}\n",
+                        format!("  Path: {} → {}  ", from_name, to_name)
+                            .bold().bright_cyan().on_black()
+                    );
+                    let hops = path.steps.len().saturating_sub(1);
+                    for line in path.describe() {
+                        println!("  {}", line.bold());
+                    }
+                    println!(
+                        "\n  {} {}",
+                        "Degrees of separation:".cyan(),
+                        hops.to_string().yellow().bold()
+                    );
+                }
+            }
+        }
+        ReportCommands::GlobalTimeline { limit } => {
+            print!("{}", global_timeline_report(app.database(), limit)?);
         }
     }
     Ok(())

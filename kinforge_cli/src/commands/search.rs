@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
+use kinforge_core::models::{TaskPriority, TaskStatus};
 use kinforge_query::{EventQuery, PersonQuery, SourceQuery};
 
 #[derive(Subcommand)]
@@ -20,6 +21,12 @@ pub enum SearchCommands {
         /// Filter by sex: male, female, unknown
         #[arg(long)]
         sex: Option<String>,
+        /// Earliest birth year (inclusive)
+        #[arg(long)]
+        birth_year_from: Option<i32>,
+        /// Latest birth year (inclusive)
+        #[arg(long)]
+        birth_year_to: Option<i32>,
     },
     /// Search sources by title, author, and/or year range
     Sources {
@@ -67,15 +74,32 @@ pub enum SearchCommands {
         /// Search query (FTS5 syntax: word, phrase "in quotes", prefix*, OR, NOT)
         query: String,
     },
+    /// Search research tasks by description keyword, status, priority, or linked person
+    Tasks {
+        /// Match against any part of the task description (case-insensitive)
+        #[arg(long)]
+        query: Option<String>,
+        /// Filter by status: pending, in-progress, done
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by priority: low, medium, high
+        #[arg(long)]
+        priority: Option<String>,
+        /// Filter to tasks linked to a specific person (ID or prefix)
+        #[arg(long)]
+        person: Option<String>,
+    },
 }
 
 pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
     match cmd {
-        SearchCommands::People { name, given, surname, sex } => {
-            if name.is_none() && given.is_none() && surname.is_none() && sex.is_none() {
+        SearchCommands::People { name, given, surname, sex, birth_year_from, birth_year_to } => {
+            if name.is_none() && given.is_none() && surname.is_none() && sex.is_none()
+                && birth_year_from.is_none() && birth_year_to.is_none()
+            {
                 println!(
                     "{}",
-                    "Provide at least one filter: --name, --given, --surname, or --sex.".yellow()
+                    "Provide at least one filter: --name, --given, --surname, --sex, or --birth-year-from/--birth-year-to.".yellow()
                 );
                 return Ok(());
             }
@@ -89,10 +113,26 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             if let Some(ref s) = surname {
                 q = q.surname_contains(s.as_str());
             }
-            if let Some(s) = sex {
+            if let Some(ref s) = sex {
                 q = q.sex(s.parse()?);
             }
-            let results = q.run(app.database())?;
+            let mut results = q.run(app.database())?;
+
+            // Apply birth-year range filter via EventQuery
+            if birth_year_from.is_some() || birth_year_to.is_some() {
+                let mut eq = EventQuery::new()
+                    .of_type(kinforge_core::models::EventType::Birth);
+                if let Some(f) = birth_year_from { eq = eq.from_year(f); }
+                if let Some(t) = birth_year_to  { eq = eq.to_year(t); }
+                let birth_events = eq.run(app.database())?;
+                let valid_ids: std::collections::HashSet<_> =
+                    birth_events.iter().map(|e| &e.person_id).collect();
+                if name.is_none() && given.is_none() && surname.is_none() && sex.is_none() {
+                    // No name/sex filter: return all people with matching birth year
+                    results = app.list_people()?;
+                }
+                results.retain(|p| valid_ids.contains(&p.id));
+            }
             if results.is_empty() {
                 println!("{}", "No matching people.".bright_black());
             } else {
@@ -104,11 +144,23 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                         .on_black()
                 );
                 for p in &results {
+                    let birth_str = if birth_year_from.is_some() || birth_year_to.is_some() {
+                        app.list_events_for_person(&p.id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .find(|e| matches!(e.event_type, kinforge_core::models::EventType::Birth))
+                            .and_then(|e| e.date)
+                            .map(|d| format!(" b.{}", d.to_string()))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
                     println!(
-                        "  {} {} {}",
+                        "  {} {} {}{}",
                         p.id.to_string().bright_black(),
                         p.display_name().bold(),
-                        format!("({})", p.sex).bright_black()
+                        format!("({})", p.sex).bright_black(),
+                        birth_str.yellow()
                     );
                 }
             }
@@ -370,6 +422,73 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                 );
                 let snippet = truncate_notes(&r.snippet, 100);
                 println!("    {}", snippet.bright_black());
+            }
+        }
+
+        SearchCommands::Tasks { query, status, priority, person } => {
+            if query.is_none() && status.is_none() && priority.is_none() && person.is_none() {
+                println!(
+                    "{}",
+                    "Provide at least one filter: --query, --status, --priority, or --person.".yellow()
+                );
+                return Ok(());
+            }
+
+            let mut tasks = if let Some(ref p) = person {
+                let pid = app.resolve_person_id(p)?;
+                app.list_tasks_for_person(&pid)?
+            } else {
+                app.list_tasks()?
+            };
+
+            if let Some(ref s) = status {
+                let filter: TaskStatus = s.parse()?;
+                tasks.retain(|t| t.status == filter);
+            }
+            if let Some(ref p) = priority {
+                let filter: TaskPriority = p.parse()?;
+                tasks.retain(|t| t.priority == filter);
+            }
+            if let Some(ref q) = query {
+                let q_lower = q.to_lowercase();
+                tasks.retain(|t| t.description.to_lowercase().contains(&q_lower));
+            }
+
+            if tasks.is_empty() {
+                println!("{}", "No matching tasks.".bright_black());
+            } else {
+                println!(
+                    "{}\n",
+                    format!("  {} task(s)  ", tasks.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
+                for t in &tasks {
+                    let status_str = match t.status {
+                        TaskStatus::Pending => "[ ]".bright_black(),
+                        TaskStatus::InProgress => "[~]".yellow(),
+                        TaskStatus::Done => "[✓]".green(),
+                    };
+                    let prio_str = match t.priority {
+                        TaskPriority::High => "HIGH ".red().bold(),
+                        TaskPriority::Medium => "MED  ".yellow(),
+                        TaskPriority::Low => "LOW  ".bright_black(),
+                    };
+                    let person_str = t.person_id
+                        .as_ref()
+                        .and_then(|pid| app.get_person(pid).ok())
+                        .map(|p| format!("  ({})", p.display_name().bright_black()))
+                        .unwrap_or_default();
+                    println!(
+                        "  {} {} {} {}{}",
+                        status_str,
+                        prio_str,
+                        t.id.as_str()[..8].bright_black(),
+                        t.description.bold(),
+                        person_str
+                    );
+                }
             }
         }
     }

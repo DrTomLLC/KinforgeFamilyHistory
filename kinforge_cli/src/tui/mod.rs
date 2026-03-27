@@ -9,7 +9,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use kinforge_app::Application;
-use kinforge_core::models::{RelationshipType, TaskPriority};
+use kinforge_core::models::{EventDate, EventType, RelationshipType, TaskPriority};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, time::Duration};
 
@@ -45,10 +45,19 @@ fn run(
                     events::Action::Quit => break,
 
                     events::Action::OpenPersonDetail(pid) => {
-                        state.detail_events =
-                            app.list_events_for_person(&pid).unwrap_or_default();
+                        let evts = app.list_events_for_person(&pid).unwrap_or_default();
+                        state.detail_event_places = evts.iter()
+                            .map(|e| e.place_id.as_ref()
+                                .and_then(|pid| app.get_place(pid).ok())
+                                .map(|pl| pl.name))
+                            .collect();
+                        state.detail_events = evts;
                         state.detail_rel_rows =
                             build_person_rel_rows(app, &pid, &state.people);
+                        state.detail_notes = app.get_person(&pid).ok()
+                            .and_then(|p| p.notes.filter(|n| !n.is_empty()));
+                        state.detail_media_count =
+                            app.list_media_for_person(&pid).map(|v| v.len()).unwrap_or(0);
                         state.detail_person_id = Some(pid);
                         state.detail_open = true;
                         state.detail_scroll = 0;
@@ -94,6 +103,105 @@ fn run(
                         let s = if surname.is_empty() { None } else { Some(surname.as_str()) };
                         let _ = app.add_person(g, s, kinforge_core::models::Sex::Unknown, None);
                         state.reload_people(app);
+                    }
+
+                    events::Action::EditPerson(pid, given, surname) => {
+                        let g = if given.is_empty() { None } else { Some(Some(given.clone())) };
+                        let s = if surname.is_empty() { None } else { Some(Some(surname.clone())) };
+                        if let Ok(p) = app.get_person(&pid) {
+                            if p.names.is_empty() {
+                                // No names yet — add one
+                                let gv = if given.is_empty() { None } else { Some(given.as_str()) };
+                                let sv = if surname.is_empty() { None } else { Some(surname.as_str()) };
+                                let _ = app.add_name_to_person(&pid, gv, sv, kinforge_core::models::NameType::Birth);
+                            } else {
+                                // Edit primary (index 0)
+                                let _ = app.update_name_on_person(&pid, 0, g, s, None);
+                            }
+                        }
+                        state.reload_people(app);
+                    }
+
+                    events::Action::CreateSource(title, author) => {
+                        let a = if author.is_empty() { None } else { Some(author.as_str()) };
+                        let _ = app.add_source(&title, a, None, None, None, None);
+                        state.reload_sources(app);
+                    }
+
+                    events::Action::DeletePerson(pid) => {
+                        let _ = app.delete_person(&pid);
+                        // Close detail if it was showing the deleted person
+                        if state.detail_person_id.as_ref() == Some(&pid) {
+                            state.detail_open = false;
+                            state.detail_person_id = None;
+                        }
+                        state.reload_people(app);
+                    }
+
+                    events::Action::DeleteSource(sid) => {
+                        let _ = app.delete_source(&sid);
+                        if state.source_detail_open {
+                            state.source_detail_open = false;
+                            state.source_detail_scroll = 0;
+                        }
+                        state.reload_sources(app);
+                        // clamp selection
+                        if state.sources_selected > 0 && state.sources_selected >= state.sources.len() {
+                            state.sources_selected = state.sources.len().saturating_sub(1);
+                        }
+                    }
+
+                    events::Action::CreateEvent(pid, type_name, date_str, place_str) => {
+                        let event_type: EventType = type_name.parse().unwrap_or(EventType::Other(type_name));
+                        let date = if date_str.is_empty() {
+                            None
+                        } else {
+                            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                .ok()
+                                .map(EventDate::Exact)
+                        };
+                        let place = if place_str.is_empty() { None } else { Some(place_str.as_str()) };
+                        let _ = app.add_event(pid.clone(), event_type, date, place, None);
+                        // Refresh detail panel and stats
+                        let evts = app.list_events_for_person(&pid).unwrap_or_default();
+                        state.detail_event_places = evts.iter()
+                            .map(|e| e.place_id.as_ref()
+                                .and_then(|plid| app.get_place(plid).ok())
+                                .map(|pl| pl.name))
+                            .collect();
+                        state.detail_events = evts;
+                        state.reload_top_places(app);
+                    }
+
+                    events::Action::EditTask(tid, desc, priority) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.description = desc;
+                            task.priority = priority;
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
+                    }
+
+                    events::Action::EditSource(sid, title, author, year) => {
+                        if let Ok(mut source) = app.get_source(&sid) {
+                            source.title = title;
+                            source.author = if author.is_empty() { None } else { Some(author) };
+                            source.year = year;
+                            let _ = app.update_source(source);
+                            state.reload_sources(app);
+                            if state.sources_selected >= state.filtered_sources.len() {
+                                state.sources_selected = state.filtered_sources.len().saturating_sub(1);
+                            }
+                        }
+                    }
+
+                    events::Action::CreateRelationship(pid1, rel_type_token, pid2) => {
+                        if let Ok(rt) = rel_type_token.parse::<RelationshipType>() {
+                            let _ = app.add_relationship(rt, pid1.clone(), pid2, None);
+                            state.detail_rel_rows =
+                                build_person_rel_rows(app, &pid1, &state.people);
+                        }
                     }
 
                     events::Action::None => {}

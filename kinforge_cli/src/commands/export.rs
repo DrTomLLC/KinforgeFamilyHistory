@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{EventDate, EventType};
+use kinforge_core::models::{EventDate, EventType, RelationshipType};
 use kinforge_import_export::{export_gedcom, export_json};
 use kinforge_reports::html_export;
 use std::fs::File;
@@ -20,8 +20,18 @@ pub enum ExportCommands {
         /// Output file path
         output: String,
     },
-    /// Export people list to CSV (id, name, sex, birth_year, death_year)
+    /// Export people list to CSV (id, given, surname, sex, birth_year, death_year)
     Csv {
+        /// Output file path
+        output: String,
+    },
+    /// Export all events to CSV (person_id, person_name, event_type, date, place)
+    EventsCsv {
+        /// Output file path
+        output: String,
+    },
+    /// Export all sources to CSV (id, title, author, year, citation_count)
+    SourcesCsv {
         /// Output file path
         output: String,
     },
@@ -33,6 +43,11 @@ pub enum ExportCommands {
     /// Export places with coordinates as GeoJSON
     Geojson {
         /// Output file path (e.g. places.geojson)
+        output: String,
+    },
+    /// Export all people as a Markdown family register document
+    Markdown {
+        /// Output file path (e.g. family.md)
         output: String,
     },
 }
@@ -132,6 +147,92 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
             );
         }
 
+        ExportCommands::EventsCsv { output } => {
+            let people = app.list_people()?;
+            let file = File::create(&output)?;
+            let mut writer = BufWriter::new(file);
+            writeln!(writer, "person_id,person_name,event_type,date,place")?;
+
+            let mut row_count = 0usize;
+            let escape = |s: &str| -> String {
+                if s.contains(',') || s.contains('"') || s.contains('\n') {
+                    format!("\"{}\"", s.replace('"', "\"\""))
+                } else {
+                    s.to_string()
+                }
+            };
+            let id_str = |id: &kinforge_core::models::PersonId| id.as_str();
+
+            for p in &people {
+                let name = p.display_name();
+                let events = app.list_events_for_person(&p.id).unwrap_or_default();
+                for ev in &events {
+                    let date_str = ev
+                        .date
+                        .as_ref()
+                        .map(|d| d.to_string())
+                        .unwrap_or_default();
+                    let place_str = ev
+                        .place_id
+                        .as_ref()
+                        .and_then(|pid| app.get_place(pid).ok())
+                        .map(|pl| pl.name)
+                        .unwrap_or_default();
+                    writeln!(
+                        writer,
+                        "{},{},{},{},{}",
+                        escape(&id_str(&p.id)),
+                        escape(&name),
+                        escape(&ev.event_type.to_string()),
+                        escape(&date_str),
+                        escape(&place_str)
+                    )?;
+                    row_count += 1;
+                }
+            }
+            writer.flush()?;
+            println!(
+                "{} {} {}",
+                "Exported events CSV \u{2192}".green().bold(),
+                output.bold(),
+                format!("({} events)", row_count).bright_black()
+            );
+        }
+
+        ExportCommands::SourcesCsv { output } => {
+            let sources = app.list_sources()?;
+            let file = File::create(&output)?;
+            let mut writer = BufWriter::new(file);
+            writeln!(writer, "id,title,author,year,citation_count")?;
+            let escape = |s: &str| -> String {
+                if s.contains(',') || s.contains('"') || s.contains('\n') {
+                    format!("\"{}\"", s.replace('"', "\"\""))
+                } else {
+                    s.to_string()
+                }
+            };
+            for s in &sources {
+                let citation_count = app.list_citations_for_source(&s.id)
+                    .map(|v| v.len()).unwrap_or(0);
+                writeln!(
+                    writer,
+                    "{},{},{},{},{}",
+                    escape(&s.id.as_str()),
+                    escape(&s.title),
+                    escape(s.author.as_deref().unwrap_or("")),
+                    s.year.map(|y| y.to_string()).unwrap_or_default(),
+                    citation_count
+                )?;
+            }
+            writer.flush()?;
+            println!(
+                "{} {} {}",
+                "Exported sources CSV \u{2192}".green().bold(),
+                output.bold(),
+                format!("({} sources)", sources.len()).bright_black()
+            );
+        }
+
         ExportCommands::Html { output } => {
             let html = html_export(app.database())?;
             std::fs::write(&output, &html)?;
@@ -141,6 +242,120 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
                 "Exported HTML \u{2192}".green().bold(),
                 output.bold(),
                 format!("({} people, {} bytes)", people.len(), html.len()).bright_black()
+            );
+        }
+
+        ExportCommands::Markdown { output } => {
+            let mut people = app.list_people()?;
+            people.sort_by(|a, b| a.display_name().cmp(&b.display_name()));
+            let file = File::create(&output)?;
+            let mut w = BufWriter::new(file);
+
+            writeln!(w, "# Family History Register")?;
+            writeln!(w)?;
+            writeln!(w, "_Generated by Kinforge_")?;
+            writeln!(w)?;
+            writeln!(w, "---")?;
+            writeln!(w)?;
+
+            for p in &people {
+                let events = app.list_events_for_person(&p.id).unwrap_or_default();
+
+                let birth_year = events
+                    .iter()
+                    .find(|e| matches!(e.event_type, EventType::Birth))
+                    .and_then(|e| e.date.as_ref())
+                    .and_then(|d| match d {
+                        EventDate::Exact(nd) | EventDate::Approximate(nd) => {
+                            Some(nd.format("%Y").to_string())
+                        }
+                        _ => None,
+                    });
+                let death_year = events
+                    .iter()
+                    .find(|e| matches!(e.event_type, EventType::Death))
+                    .and_then(|e| e.date.as_ref())
+                    .and_then(|d| match d {
+                        EventDate::Exact(nd) | EventDate::Approximate(nd) => {
+                            Some(nd.format("%Y").to_string())
+                        }
+                        _ => None,
+                    });
+
+                let life_str = match (birth_year.as_deref(), death_year.as_deref()) {
+                    (Some(b), Some(d)) => format!(" (b. {} – d. {})", b, d),
+                    (Some(b), None) => format!(" (b. {})", b),
+                    (None, Some(d)) => format!(" (d. {})", d),
+                    (None, None) => String::new(),
+                };
+
+                writeln!(w, "## {}{}", p.display_name(), life_str)?;
+                writeln!(w)?;
+                writeln!(w, "**ID:** `{}`  ", p.id)?;
+                writeln!(w, "**Sex:** {}  ", p.sex)?;
+                if let Some(ref notes) = p.notes {
+                    writeln!(w)?;
+                    writeln!(w, "_{}_", notes.replace('_', "\\_"))?;
+                }
+
+                if !events.is_empty() {
+                    writeln!(w)?;
+                    writeln!(w, "### Events")?;
+                    writeln!(w)?;
+                    for ev in &events {
+                        let date_s = ev.date.as_ref().map(|d| d.to_string()).unwrap_or_default();
+                        let place_s = ev.place_id.as_ref()
+                            .and_then(|pid| app.get_place(pid).ok())
+                            .map(|pl| format!(", {}", pl.name))
+                            .unwrap_or_default();
+                        writeln!(w, "- **{}**{}{}", ev.event_type,
+                            if date_s.is_empty() { String::new() } else { format!(": {}", date_s) },
+                            place_s
+                        )?;
+                    }
+                }
+
+                let rels = app.list_relationships_for_person(&p.id).unwrap_or_default();
+                if !rels.is_empty() {
+                    writeln!(w)?;
+                    writeln!(w, "### Relationships")?;
+                    writeln!(w)?;
+                    for rel in &rels {
+                        let is_p1 = rel.person1_id == p.id;
+                        let other_id = if is_p1 { &rel.person2_id } else { &rel.person1_id };
+                        let other_name = app.get_person(other_id)
+                            .map(|op| op.display_name())
+                            .unwrap_or_else(|_| other_id.to_string());
+                        let label = match (&rel.rel_type, is_p1) {
+                            (RelationshipType::ParentChild, true) => "Parent of",
+                            (RelationshipType::ParentChild, false) => "Child of",
+                            (RelationshipType::Spouse, _) => "Spouse of",
+                            (RelationshipType::Sibling, _) => "Sibling of",
+                            (RelationshipType::AdoptiveParent, true) => "Adoptive parent of",
+                            (RelationshipType::AdoptiveParent, false) => "Adopted by",
+                            (RelationshipType::Godparent, true) => "Godparent of",
+                            (RelationshipType::Godparent, false) => "Godchild of",
+                            (RelationshipType::HalfSibling, _) => "Half-sibling of",
+                            (RelationshipType::StepParent, true) => "Stepparent of",
+                            (RelationshipType::StepParent, false) => "Stepchild of",
+                            (RelationshipType::Foster, true) => "Foster parent of",
+                            (RelationshipType::Foster, false) => "Foster child of",
+                        };
+                        writeln!(w, "- **{}** {}", label, other_name)?;
+                    }
+                }
+
+                writeln!(w)?;
+                writeln!(w, "---")?;
+                writeln!(w)?;
+            }
+
+            w.flush()?;
+            println!(
+                "{} {} {}",
+                "Exported Markdown →".green().bold(),
+                output.bold(),
+                format!("({} people)", people.len()).bright_black()
             );
         }
 

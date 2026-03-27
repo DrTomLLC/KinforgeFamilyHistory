@@ -19,7 +19,11 @@ pub enum PersonCommands {
         notes: Option<String>,
     },
     /// List all people
-    List,
+    List {
+        /// Sort order: name (default) or birth-year
+        #[arg(long, default_value = "name")]
+        sort: String,
+    },
     /// Show full details for a person
     Show { id: String },
     /// Update a person's sex or notes (use 'person add-name' to add names)
@@ -153,8 +157,38 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
             );
         }
 
-        PersonCommands::List => {
-            let people = app.list_people()?;
+        PersonCommands::List { sort } => {
+            let mut people = app.list_people()?;
+            match sort.as_str() {
+                "birth-year" | "birth_year" | "birthyear" => {
+                    // Sort by birth year using events (best-effort; None sorts last)
+                    let mut with_years: Vec<_> = people
+                        .into_iter()
+                        .map(|p| {
+                            let year = app
+                                .list_events_for_person(&p.id)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .find(|e| matches!(e.event_type, kinforge_core::models::EventType::Birth))
+                                .and_then(|e| e.date)
+                                .and_then(|d| match d {
+                                    kinforge_core::models::EventDate::Exact(nd)
+                                    | kinforge_core::models::EventDate::Approximate(nd) => {
+                                        nd.format("%Y").to_string().parse::<i32>().ok()
+                                    }
+                                    _ => None,
+                                });
+                            (p, year)
+                        })
+                        .collect();
+                    with_years.sort_by(|a, b| a.1.cmp(&b.1));
+                    people = with_years.into_iter().map(|(p, _)| p).collect();
+                }
+                _ => {
+                    // Default: sort by display name
+                    people.sort_by(|a, b| a.display_name().cmp(&b.display_name()));
+                }
+            }
             if people.is_empty() {
                 println!("{}", "No people in database.".bright_black());
             } else {

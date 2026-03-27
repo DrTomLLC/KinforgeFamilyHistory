@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{InputMode, Tab, TaskRow, TuiState};
+use super::state::{InputMode, Tab, TaskRow, TaskStatusFilter, TuiState, TUI_EVENT_TYPES, TUI_REL_TYPES};
 use kinforge_core::models::{TaskPriority, TaskStatus};
 
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -77,6 +77,86 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     if state.mode == InputMode::PersonCreate {
         draw_person_create_popup(frame, state, area);
     }
+    if state.mode == InputMode::PersonEdit {
+        draw_person_edit_popup(frame, state, area);
+    }
+    if state.mode == InputMode::ConfirmDelete {
+        draw_confirm_delete_popup(frame, state, area);
+    }
+    if state.mode == InputMode::EventCreate {
+        draw_event_create_popup(frame, state, area);
+    }
+    if state.mode == InputMode::RelationshipCreate {
+        draw_rel_create_popup(frame, state, area);
+    }
+}
+
+fn draw_confirm_delete_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 52_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 1;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 3 };
+
+    let name = truncate(&state.confirm_name, 30);
+    let msg = format!("  Delete \"{}\"?  y = confirm · any key = cancel", name);
+
+    let para = Paragraph::new(Line::from(Span::styled(
+        msg,
+        Style::default().fg(Color::White),
+    )))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Confirm Delete ")
+            .border_style(Style::default().fg(Color::Red)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_person_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 50_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 2;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 5 };
+
+    let cursor = "_";
+    let given_text = if state.person_edit_field == 0 {
+        format!("{}{}", state.person_edit_given, cursor)
+    } else {
+        state.person_edit_given.clone()
+    };
+    let surname_text = if state.person_edit_field == 1 {
+        format!("{}{}", state.person_edit_surname, cursor)
+    } else {
+        state.person_edit_surname.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Given:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(given_text, if state.person_edit_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Surname: ", Style::default().fg(Color::Cyan)),
+            Span::styled(surname_text, if state.person_edit_field == 1 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Name — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
 }
 
 fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -128,7 +208,114 @@ fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
     frame.render_widget(para, popup_area);
 }
 
+fn draw_event_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 58_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 7 };
+
+    let type_name = TUI_EVENT_TYPES[state.event_create_type_idx];
+    let type_text = if state.event_create_field == 0 {
+        format!("◄ {} ►", type_name)
+    } else {
+        type_name.to_string()
+    };
+
+    let cursor = "_";
+    let date_text = if state.event_create_field == 1 {
+        format!("{}{}", state.event_create_date, cursor)
+    } else {
+        state.event_create_date.clone()
+    };
+    let place_text = if state.event_create_field == 2 {
+        format!("{}{}", state.event_create_place, cursor)
+    } else {
+        state.event_create_place.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Type:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(type_text, if state.event_create_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("          ←/→ cycle types", Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Date:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(date_text, if state.event_create_field == 1 { active } else { inactive }),
+            Span::styled(" (YYYY-MM-DD, optional)", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Place:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(place_text, if state.event_create_field == 2 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Add Event — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_rel_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 60_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 6 };
+
+    let (rel_label, _) = TUI_REL_TYPES[state.rel_create_type_idx];
+    let rel_text = if state.rel_create_field == 1 {
+        format!("◄ {} ►", rel_label)
+    } else {
+        rel_label.to_string()
+    };
+
+    let cursor = "_";
+    let person2_text = if state.rel_create_field == 0 {
+        format!("{}{}", state.rel_create_person2_buf, cursor)
+    } else {
+        state.rel_create_person2_buf.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Type:    ", Style::default().fg(Color::Cyan)),
+            Span::styled(rel_text, if state.rel_create_field == 1 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("           Tab: switch  ←/→: cycle type", Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Person:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(person2_text, if state.rel_create_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("           (type name fragment — first match used)", Style::default().fg(Color::DarkGray))),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Add Relationship — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
 fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let sort_badge = format!("[sort: {}]", state.sort_order.label());
     let title = if state.search_active {
         format!(
             " People — Filter: {} ({} match) ",
@@ -137,13 +324,14 @@ fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
         )
     } else if !state.search_query.is_empty() {
         format!(
-            " People — \"{}\" ({}/{}) ",
+            " People — \"{}\" ({}/{}) {} ",
             state.search_query,
             state.filtered_people.len(),
-            state.people.len()
+            state.people.len(),
+            sort_badge
         )
     } else {
-        format!(" People ({}) ", state.people.len())
+        format!(" People ({}) {} ", state.people.len(), sort_badge)
     };
 
     let items: Vec<ListItem> = state
@@ -210,18 +398,24 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        for event in &state.detail_events {
+        for (i, event) in state.detail_events.iter().enumerate() {
             let date_str = event
                 .date
                 .as_ref()
                 .map(|d| d.to_string())
                 .unwrap_or_else(|| "—".to_string());
+            let place_str = state.detail_event_places
+                .get(i)
+                .and_then(|p| p.as_deref())
+                .map(|p| format!("  @ {}", truncate(p, 20)))
+                .unwrap_or_default();
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {:<14}", truncate(&event.event_type.to_string(), 14)),
                     Style::default().fg(Color::Yellow),
                 ),
                 Span::raw(date_str),
+                Span::styled(place_str, Style::default().fg(Color::DarkGray)),
             ]));
         }
     }
@@ -253,6 +447,37 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
                 Span::raw(other_name.as_str()),
             ]));
         }
+    }
+
+    // Notes section
+    if let Some(ref notes) = state.detail_notes {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            " Notes",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            " ────────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+        for note_line in notes.lines() {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", note_line),
+                Style::default().fg(Color::White),
+            )));
+        }
+    }
+
+    // Media badge
+    if state.detail_media_count > 0 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("  Media  ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("{} attachment(s)", state.detail_media_count),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]));
     }
 
     let scroll = state.detail_scroll as u16;
@@ -330,17 +555,24 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
         list_state.select(Some(state.tasks_selected));
     }
 
-    let hint = if state.tasks.is_empty() {
-        String::new()
+    let filter_badge = if state.task_status_filter != TaskStatusFilter::All {
+        format!("  [{}]", state.task_status_filter.label())
     } else {
-        "  d/c: mark done".to_string()
+        String::new()
     };
+    let visible_count = state.task_rows.iter().filter(|r| matches!(r, TaskRow::Item(_))).count();
+    let title = format!(
+        " Research Tasks ({}/{}){} ",
+        visible_count,
+        state.tasks.len(),
+        filter_badge
+    );
 
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Research Tasks ({}){} ", state.tasks.len(), hint)),
+                .title(title),
         )
         .highlight_style(
             Style::default()
@@ -351,9 +583,12 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
 
     frame.render_stateful_widget(list, area, &mut list_state);
 
-    // Render task-create popup on top when active
+    // Render popups on top
     if state.mode == InputMode::TaskCreate {
         draw_task_create_popup(frame, state, area);
+    }
+    if state.mode == InputMode::TaskEdit {
+        draw_task_edit_popup(frame, state, area);
     }
 }
 
@@ -380,6 +615,53 @@ fn draw_task_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
     frame.render_widget(para, popup_area);
 }
 
+fn draw_task_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 60_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 2;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 5 };
+
+    let prio_labels = ["Low ◄", "Medium", "► High"];
+    let prio_label = prio_labels[state.task_edit_priority_idx];
+
+    let cursor = "_";
+    let desc_text = if state.task_edit_field == 0 {
+        format!("{}{}", state.task_edit_desc, cursor)
+    } else {
+        state.task_edit_desc.clone()
+    };
+    let prio_text = if state.task_edit_field == 1 {
+        format!("◄ {} ►", prio_labels[state.task_edit_priority_idx])
+    } else {
+        prio_label.to_string()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Desc:     ", Style::default().fg(Color::Cyan)),
+            Span::styled(desc_text, if state.task_edit_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Priority: ", Style::default().fg(Color::Cyan)),
+            Span::styled(prio_text, if state.task_edit_field == 1 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Task — Tab: switch · ←/→: priority · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
 // ── Sources tab ───────────────────────────────────────────────────────────────
 
 fn draw_sources(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -393,13 +675,118 @@ fn draw_sources(frame: &mut Frame, state: &TuiState, area: Rect) {
     } else {
         draw_sources_list(frame, state, area);
     }
+
+    if state.mode == InputMode::SourceCreate {
+        draw_source_create_popup(frame, state, area);
+    }
+    if state.mode == InputMode::SourceEdit {
+        draw_source_edit_popup(frame, state, area);
+    }
+}
+
+fn draw_source_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 56_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 2;
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: 5,
+    };
+
+    let cursor = "_";
+    let title_text = if state.source_create_field == 0 {
+        format!("{}{}", state.source_create_title, cursor)
+    } else {
+        state.source_create_title.clone()
+    };
+    let author_text = if state.source_create_field == 1 {
+        format!("{}{}", state.source_create_author, cursor)
+    } else {
+        state.source_create_author.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Title:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(title_text, if state.source_create_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Author:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(author_text, if state.source_create_field == 1 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" New Source — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_source_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 62_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 7 };
+
+    let cursor = "_";
+    let title_text = if state.source_edit_field == 0 {
+        format!("{}{}", state.source_edit_title, cursor)
+    } else { state.source_edit_title.clone() };
+    let author_text = if state.source_edit_field == 1 {
+        format!("{}{}", state.source_edit_author, cursor)
+    } else { state.source_edit_author.clone() };
+    let year_text = if state.source_edit_field == 2 {
+        format!("{}{}", state.source_edit_year, cursor)
+    } else { state.source_edit_year.clone() };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Title:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(title_text, if state.source_edit_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Author:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(author_text, if state.source_edit_field == 1 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Year:    ", Style::default().fg(Color::Cyan)),
+            Span::styled(year_text, if state.source_edit_field == 2 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Source — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
 }
 
 fn draw_sources_list(frame: &mut Frame, state: &TuiState, area: Rect) {
     let items: Vec<ListItem> = state
-        .sources
+        .filtered_sources
         .iter()
-        .map(|s| {
+        .map(|&idx| {
+            let s = &state.sources[idx];
             let year_str = s
                 .year
                 .map(|y| format!(" {}", y))
@@ -419,15 +806,26 @@ fn draw_sources_list(frame: &mut Frame, state: &TuiState, area: Rect) {
         .collect();
 
     let mut list_state = ListState::default();
-    if !state.sources.is_empty() {
+    if !state.filtered_sources.is_empty() {
         list_state.select(Some(state.sources_selected));
     }
+
+    let title = if !state.source_search_query.is_empty() {
+        format!(
+            " Sources — \"{}\" ({}/{}) ",
+            state.source_search_query,
+            state.filtered_sources.len(),
+            state.sources.len()
+        )
+    } else {
+        format!(" Sources ({}) ", state.sources.len())
+    };
 
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Sources ({}) ", state.sources.len())),
+                .title(title),
         )
         .highlight_style(
             Style::default()
@@ -534,6 +932,33 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
                     ),
                 ]));
             }
+            // Derived metrics
+            if s.people > 0 {
+                let avg = s.events as f64 / s.people as f64;
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("    {:<18}", "Avg events/person"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("{:.1}", avg),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            if s.events > 0 {
+                let pct = s.citations * 100 / s.events;
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("    {:<18}", "Citation coverage"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("{}%", pct),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
         }
         None => {
             lines.push(Line::from(Span::styled(
@@ -585,6 +1010,27 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
         ]));
     }
 
+    // ── Top places ───────────────────────────────────────────────────────────
+    if !state.top_places.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "    Top Places",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        for (name, count) in &state.top_places {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("      {:<22}", truncate(name, 22)),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} event{}", count, if *count == 1 { "" } else { "s" }),
+                    Style::default().fg(Color::Yellow),
+                ),
+            ]));
+        }
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(
@@ -607,27 +1053,35 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
 
 fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
     let text = match state.mode {
-        InputMode::Search => format!(
-            " ESC: cancel  Backspace: delete  [{} match(es)]",
-            state.filtered_people.len()
-        ),
+        InputMode::Search => if state.active_tab == Tab::Sources {
+            format!(" ESC: cancel  Backspace: delete  [{} match(es)]", state.filtered_sources.len())
+        } else {
+            format!(" ESC: cancel  Backspace: delete  [{} match(es)]", state.filtered_people.len())
+        },
         InputMode::TaskCreate => " Type task description  Enter: save  Esc: cancel".to_string(),
+        InputMode::TaskEdit => " Tab: switch field  ←/→: priority  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
+        InputMode::PersonEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
+        InputMode::SourceCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
+        InputMode::ConfirmDelete => " y: confirm delete  any other key: cancel".to_string(),
+        InputMode::EventCreate => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
+        InputMode::RelationshipCreate => " Tab: switch field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
+        InputMode::SourceEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
-                    " ESC/Enter: close panel  ↑↓/jk: scroll  /: search  Tab: next tab  q: quit".to_string()
+                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  r: add rel  e: edit name  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next tab  ↑↓/jk: navigate  n: new  /: search  Enter: detail  q: quit"
+                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()
                 }
             }
-            Tab::Tasks => " Tab: next tab  ↑↓/jk: navigate  n: new  d/c: done  p: priority  x: delete  q: quit".to_string(),
+            Tab::Tasks => " Tab: next  ↑↓/jk  g/G  n: new  e: edit  d/c: done  p: priority  x: delete  f: filter  q: quit".to_string(),
             Tab::Sources => {
                 if state.source_detail_open {
-                    " ESC/Enter: close panel  ↑↓/jk: scroll  Tab: next tab  q: quit".to_string()
+                    " ESC/Enter: close  ↑↓/jk: scroll  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next tab  ↑↓/jk: navigate  Enter: citations  q: quit".to_string()
+                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  x: delete  /: search  Enter: citations  q: quit".to_string()
                 }
             }
             Tab::Stats => " Tab: next tab  q: quit".to_string(),

@@ -132,6 +132,24 @@ pub fn individual_report(db: &Database, person_id: &PersonId) -> KinforgeResult<
         }
     }
 
+    // Research Tasks linked to this person
+    let tasks = db.list_tasks_for_person(person_id).unwrap_or_default();
+    if !tasks.is_empty() {
+        out.push_str(&format!("\n{}\n", "Research Tasks:".cyan().bold()));
+        for task in &tasks {
+            let status_marker = match task.status {
+                TaskStatus::Pending => "[ ]".bright_black(),
+                TaskStatus::InProgress => "[~]".yellow(),
+                TaskStatus::Done => "[✓]".green(),
+            };
+            out.push_str(&format!(
+                "  {} {}\n",
+                status_marker,
+                task.description.bold()
+            ));
+        }
+    }
+
     out.push('\n');
     Ok(out)
 }
@@ -1104,10 +1122,261 @@ pub fn html_export(db: &Database) -> KinforgeResult<String> {
     Ok(out)
 }
 
+// ─── places report ──────────────────────────────────────────────────────────
+
+/// Generate a colored list of all places, sorted by number of linked events (descending).
+pub fn places_report(db: &Database) -> KinforgeResult<String> {
+    use std::collections::HashMap;
+
+    let places = db.list_places()?;
+    let all_events = db.list_all_events()?;
+
+    // Count events per place
+    let mut event_counts: HashMap<String, usize> = HashMap::new();
+    for ev in &all_events {
+        if let Some(ref pid) = ev.place_id {
+            *event_counts.entry(pid.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    let mut place_rows: Vec<_> = places
+        .iter()
+        .map(|p| {
+            let count = event_counts.get(&p.id.to_string()).copied().unwrap_or(0);
+            (p, count)
+        })
+        .collect();
+    place_rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.name.cmp(&b.0.name)));
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        format!("  {} place{} in database  ", places.len(), if places.len() == 1 { "" } else { "s" })
+            .bold()
+            .bright_cyan()
+            .on_black()
+    ));
+
+    if place_rows.is_empty() {
+        out.push_str(&format!("{}\n", "  (no places recorded)".bright_black()));
+        return Ok(out);
+    }
+
+    for (place, count) in &place_rows {
+        let coord_str = match (place.latitude, place.longitude) {
+            (Some(lat), Some(lon)) => format!(" {}", format!("({:.4}°, {:.4}°)", lat, lon).bright_black()),
+            _ => String::new(),
+        };
+        let parent_str = if let Some(ref par_id) = place.parent_id {
+            db.get_place(par_id)
+                .map(|par| format!(" ∈ {}", par.name.bright_black()))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let count_str = if *count > 0 {
+            format!("  {}", format!("{} event{}", count, if *count == 1 { "" } else { "s" }).yellow())
+        } else {
+            format!("  {}", "no events".bright_black())
+        };
+        out.push_str(&format!(
+            "  {} {}{}{}{}\n",
+            fmt_id(&place.id.to_string()),
+            place.name.bold(),
+            parent_str,
+            coord_str,
+            count_str,
+        ));
+    }
+    Ok(out)
+}
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+// ─── global timeline report ─────────────────────────────────────────────────
+
+/// Chronological timeline of all events across the database, with person names.
+pub fn global_timeline_report(db: &Database, limit: usize) -> KinforgeResult<String> {
+    let mut all_events = db.list_all_events()?;
+    let mut out = String::new();
+
+    // Sort: dated events chronologically, undated at end
+    all_events.sort_by(|a, b| {
+        let key = |e: &Event| -> Option<NaiveDate> {
+            e.date.as_ref().and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd)
+                | EventDate::Before(nd) | EventDate::After(nd)
+                | EventDate::Between(nd, _) => Some(*nd),
+                EventDate::Unknown => None,
+            })
+        };
+        match (key(a), key(b)) {
+            (Some(da), Some(db)) => da.cmp(&db),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+
+    let total = all_events.len();
+    let shown = total.min(limit);
+
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Global Timeline ({} events, showing {})  ", total, shown)
+            .bold().bright_cyan().on_black(),
+        "─".repeat(44).bright_black()
+    ));
+
+    for e in all_events.iter().take(limit) {
+        let person_name = db.get_person(&e.person_id)
+            .map(|p| p.display_name())
+            .unwrap_or_else(|_| e.person_id.to_string());
+        let date_str = e.date.as_ref()
+            .map(|d| d.to_string().yellow().to_string())
+            .unwrap_or_else(|| "undated".bright_black().to_string());
+        let place_str = e.place_id.as_ref()
+            .and_then(|pid| db.get_place(pid).ok())
+            .map(|pl| format!(" @ {}", pl.name.green()))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "  {:<12} {}  {}  {}{}\n",
+            e.event_type.to_string().bright_cyan(),
+            date_str,
+            person_name.bold(),
+            "".to_string(),
+            place_str
+        ));
+    }
+
+    if total > limit {
+        out.push_str(&format!(
+            "\n  {} more events not shown (use --limit to increase)\n",
+            (total - limit).to_string().bright_black()
+        ));
+    }
+
+    Ok(out)
+}
+
+// ─── summary report ─────────────────────────────────────────────────────────
+
+/// One-page compact summary: counts, completeness metrics, top surnames, top event types.
+pub fn summary_report(db: &Database) -> KinforgeResult<String> {
+    let people = db.list_people()?;
+    let all_events = db.list_all_events()?;
+    let sources = db.list_sources()?;
+    let places = db.list_places()?;
+    let stats = db.stats()?;
+
+    let mut out = String::new();
+
+    // Header
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        "  Family History Summary  ".bold().bright_cyan().on_black(),
+        "─".repeat(30).bright_black()
+    ));
+
+    // Record counts
+    let rows: &[(&str, u64)] = &[
+        ("People", stats.people),
+        ("Events", stats.events),
+        ("Relationships", stats.relationships),
+        ("Places", stats.places),
+        ("Sources", stats.sources),
+        ("Citations", stats.citations),
+    ];
+    for (label, count) in rows {
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            label.cyan(),
+            count.to_string().bold().yellow()
+        ));
+    }
+
+    // Derived metrics
+    if stats.people > 0 {
+        let avg = stats.events as f64 / stats.people as f64;
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "Avg events / person".cyan(),
+            format!("{:.1}", avg).bold()
+        ));
+    }
+    if stats.events > 0 {
+        let pct = stats.citations * 100 / stats.events;
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "Citation coverage".cyan(),
+            format!("{}%", pct).bold()
+        ));
+    }
+    let _ = places;
+
+    // Top 5 surnames
+    let mut surname_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in &people {
+        if let Some(sn) = p.names.first().and_then(|n| n.surname.as_deref()) {
+            if !sn.is_empty() {
+                *surname_counts.entry(sn.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+    if !surname_counts.is_empty() {
+        out.push_str(&format!("\n{}\n", "Top Surnames:".bold().cyan()));
+        let mut surnames: Vec<(&String, &usize)> = surname_counts.iter().collect();
+        surnames.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (name, count) in surnames.iter().take(5) {
+            out.push_str(&format!(
+                "  {:>4}  {}\n",
+                count.to_string().yellow().bold(),
+                name.bold()
+            ));
+        }
+    }
+
+    // Top 5 event types
+    let mut type_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in &all_events {
+        *type_counts.entry(e.event_type.to_string()).or_insert(0) += 1;
+    }
+    if !type_counts.is_empty() {
+        out.push_str(&format!("\n{}\n", "Top Event Types:".bold().cyan()));
+        let mut types: Vec<(&String, &usize)> = type_counts.iter().collect();
+        types.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (etype, count) in types.iter().take(5) {
+            out.push_str(&format!(
+                "  {:>4}  {}\n",
+                count.to_string().yellow().bold(),
+                etype.bold()
+            ));
+        }
+    }
+
+    // Source overview
+    if !sources.is_empty() {
+        out.push_str(&format!(
+            "\n{} {}\n",
+            "Sources:".cyan().bold(),
+            format!("{} record(s)", sources.len()).bright_black()
+        ));
+        for s in sources.iter().take(5) {
+            out.push_str(&format!("  • {}\n", s.title.bold()));
+        }
+        if sources.len() > 5 {
+            out.push_str(&format!(
+                "  {} more…\n",
+                (sources.len() - 5).to_string().bright_black()
+            ));
+        }
+    }
+
+    Ok(out)
 }
