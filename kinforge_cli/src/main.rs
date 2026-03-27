@@ -5,11 +5,13 @@ use kinforge_config::Config;
 use std::path::PathBuf;
 
 mod commands;
+mod tui;
 use commands::{
-    citation::CitationCommands, config::ConfigCommands, event::EventCommands,
-    export::ExportCommands, import::ImportCommands, person::PersonCommands,
-    place::PlaceCommands, relationship::RelationshipCommands, report::ReportCommands,
-    search::SearchCommands, source::SourceCommands,
+    backup::BackupCommands, citation::CitationCommands, config::ConfigCommands, event::EventCommands,
+    export::ExportCommands, import::ImportCommands, media::MediaCommands,
+    person::PersonCommands, place::PlaceCommands, relationship::RelationshipCommands,
+    report::ReportCommands, search::SearchCommands, source::SourceCommands,
+    task::TaskCommands,
 };
 
 #[derive(Parser)]
@@ -81,12 +83,34 @@ enum Commands {
     #[command(subcommand)]
     Search(SearchCommands),
 
+    /// Manage media attachments (photos, documents, audio, video)
+    #[command(subcommand)]
+    Media(MediaCommands),
+
     /// Manage configuration (show, init, set)
     #[command(subcommand)]
     Config(ConfigCommands),
 
+    /// Interactive TUI browser (People, Tasks, Stats)
+    Tui,
+
+    /// Manage research tasks
+    #[command(subcommand)]
+    Task(TaskCommands),
+
+    /// Show upcoming birthdays and anniversaries
+    Reminders {
+        /// Days ahead to look (default: 30)
+        #[arg(long, default_value = "30")]
+        days: u32,
+    },
+
     /// Run data integrity checks and report issues
     Check,
+
+    /// Manage database backups
+    #[command(subcommand)]
+    Backup(BackupCommands),
 }
 
 fn main() -> Result<()> {
@@ -122,7 +146,12 @@ fn main() -> Result<()> {
         Commands::Export(cmd) => commands::export::handle(cmd, &app)?,
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
+        Commands::Media(cmd) => commands::media::handle(cmd, &app)?,
+        Commands::Tui => tui::handle(&app)?,
+        Commands::Task(cmd) => commands::task::handle(cmd, &app)?,
+        Commands::Reminders { days } => commands::reminders::handle(days, &app)?,
         Commands::Check => commands::check::handle(&app)?,
+        Commands::Backup(cmd) => commands::backup::handle(cmd, &app)?,
         Commands::Config(_) => unreachable!(),
     }
 

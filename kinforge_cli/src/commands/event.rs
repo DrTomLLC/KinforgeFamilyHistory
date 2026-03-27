@@ -2,8 +2,7 @@ use anyhow::{bail, Result};
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{EventDate, EventType, Place, PlaceId};
-use kinforge_storage::Database;
+use kinforge_core::models::{EventDate, EventType};
 
 #[derive(Subcommand)]
 pub enum EventCommands {
@@ -223,7 +222,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
                 event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
             }
             if let Some(ref place_name) = place {
-                event.place_id = Some(find_or_create_place(&app.db, place_name)?);
+                event.place_id = Some(app.find_or_create_place(place_name)?);
             }
             if let Some(n) = notes {
                 event.notes = Some(n);
@@ -247,21 +246,6 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Look up a place by exact name (case-insensitive); create it if not found.
-fn find_or_create_place(db: &Database, name: &str) -> Result<PlaceId> {
-    let lower = name.to_lowercase();
-    if let Some(existing) = db
-        .list_places()?
-        .into_iter()
-        .find(|p| p.name.to_lowercase() == lower)
-    {
-        return Ok(existing.id);
-    }
-    let place = Place::new(name);
-    db.insert_place(&place)?;
-    Ok(place.id)
 }
 
 fn format_confidence(conf: &kinforge_core::models::ConfidenceLevel) -> String {

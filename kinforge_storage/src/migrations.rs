@@ -25,6 +25,21 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])?;
     }
 
+    if version < 2 {
+        conn.execute_batch(MIGRATION_2)?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])?;
+    }
+
+    if version < 3 {
+        conn.execute_batch(MIGRATION_3)?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])?;
+    }
+
+    if version < 4 {
+        conn.execute_batch(MIGRATION_4)?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])?;
+    }
+
     Ok(())
 }
 
@@ -98,4 +113,51 @@ CREATE INDEX IF NOT EXISTS idx_relationships_person1 ON relationships(person1_id
 CREATE INDEX IF NOT EXISTS idx_relationships_person2 ON relationships(person2_id);
 CREATE INDEX IF NOT EXISTS idx_citations_event_id ON citations(event_id);
 CREATE INDEX IF NOT EXISTS idx_citations_source_id ON citations(source_id);
+";
+
+const MIGRATION_2: &str = "
+CREATE TABLE IF NOT EXISTS media (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    path        TEXT,
+    url         TEXT,
+    media_type  TEXT NOT NULL DEFAULT 'Other',
+    description TEXT,
+    date        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS media_links (
+    id          TEXT PRIMARY KEY,
+    media_id    TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL,
+    entity_id   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_links_media_id ON media_links(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_links_entity ON media_links(entity_type, entity_id);
+";
+
+const MIGRATION_3: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(
+    body,
+    entity_type UNINDEXED,
+    entity_id   UNINDEXED,
+    tokenize    = 'unicode61'
+);
+";
+
+const MIGRATION_4: &str = "
+CREATE TABLE IF NOT EXISTS research_tasks (
+    id          TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    person_id   TEXT REFERENCES people(id) ON DELETE SET NULL,
+    priority    TEXT NOT NULL DEFAULT 'Medium',
+    status      TEXT NOT NULL DEFAULT 'Pending',
+    notes       TEXT,
+    created     TEXT NOT NULL,
+    updated     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_person_id ON research_tasks(person_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON research_tasks(status);
 ";

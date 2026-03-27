@@ -1,6 +1,8 @@
+pub mod backup;
 pub mod check;
 pub mod citation;
 pub mod config;
+pub mod media;
 pub mod event;
 pub mod export;
 pub mod import;
@@ -10,3 +12,5 @@ pub mod relationship;
 pub mod report;
 pub mod search;
 pub mod source;
+pub mod task;
+pub mod reminders;

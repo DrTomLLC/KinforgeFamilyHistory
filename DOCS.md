@@ -1,7 +1,8 @@
 # Kinforge Family History — Project Documentation
 
-> **Last updated:** 2026-03-25
-> **Build status:** 50/50 tests passing · 0 clippy warnings · `cargo fmt` clean
+> **Last updated:** 2026-03-27
+> **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.0.0
 
 ---
 
@@ -24,13 +25,14 @@
 
 ## What Is Kinforge?
 
-Kinforge is a local-first, research-grade genealogy program. It stores all data in a SQLite database file on your own machine — no cloud, no telemetry, no subscription required. It is operated from the command line.
+Kinforge is a local-first, research-grade genealogy program. It stores all data in a SQLite database file on your own machine — no cloud, no telemetry, no subscription required. It is operated from the command line, or via an interactive terminal TUI.
 
 Key design principles:
 - **Local-first**: your data never leaves your machine unless you export it
 - **Source-citation discipline**: every fact can be linked to a source record with a confidence rating
 - **No data loss**: backups are made automatically on every start; schema migrations preserve all existing data
 - **Standard file formats**: import and export GEDCOM 5.5 (the genealogy industry standard) and JSON
+- **Research-grade**: full-text search, research task tracking, relationship path finding, narrative reports
 
 ---
 
@@ -50,6 +52,7 @@ Key design principles:
 | Backup-on-open system (timestamped `YYYY-MM-DD_HH-MM-SS` copies, auto-prune) | ✅ Complete | 2 unit tests |
 | GEDCOM 5.5 export (INDI, FAM, SOUR records) | ✅ Complete | 4 integration tests |
 | GEDCOM 5.5 import (people, events, families, sources) | ✅ Complete | 4 integration tests |
+| GEDCOM import deduplication (fingerprint-based skip for existing people) | ✅ Complete | tested |
 | JSON export and import (full round-trip) | ✅ Complete | — |
 | TOML configuration file with XDG-compliant paths | ✅ Complete | 2 unit tests |
 | CLI: person add/list/show/update/add-name/delete | ✅ Complete | — |
@@ -61,21 +64,37 @@ Key design principles:
 | CLI: report stats/people/individual/ancestors/descendants/tree | ✅ Complete | — |
 | CLI: search people (by name, sex filter) | ✅ Complete | — |
 | CLI: search sources (by title, year range) | ✅ Complete | — |
-| CLI: export gedcom/json | ✅ Complete | — |
+| CLI: export gedcom/json/csv/html/geojson | ✅ Complete | — |
 | CLI: import gedcom/json | ✅ Complete | — |
 | CLI: config (show active paths and settings) | ✅ Complete | — |
 | ASCII family tree visualization | ✅ Complete | — |
+| ASCII ancestor tree visualization | ✅ Complete | — |
 | Ancestor report with Ahnentafel numbering | ✅ Complete | — |
 | Descendant report with birth years | ✅ Complete | — |
 | People list showing birth year | ✅ Complete | — |
 | Individual report with life dates summary | ✅ Complete | — |
+| Family group sheet report | ✅ Complete | — |
+| Chronological timeline report | ✅ Complete | — |
+| Narrative prose biography report | ✅ Complete | tested |
+| Sources report (with citation counts) | ✅ Complete | tested |
 | Place parent hierarchy (town → county → state) | ✅ Complete | 2 tests |
 | Relationship notes editing | ✅ Complete | 1 test |
 | Query system (PersonQuery, EventQuery, SourceQuery) | ✅ Complete | — |
+| Extended relationship types (adoptive, godparent, half-sibling, step, foster) | ✅ Complete | tested |
+| Media attachments (photos, documents, audio, video; link to people/events/sources) | ✅ Complete | tested |
+| FTS5 full-text search across all entities | ✅ Complete | 4 tests |
+| Relationship path finding (BFS; `person path --from X --to Y`) | ✅ Complete | 4 tests |
+| Self-contained single-file HTML export | ✅ Complete | tested |
+| Duplicate person detection (`kinforge check`) | ✅ Complete | tested |
+| Research task tracking (`kinforge task`) | ✅ Complete | 8 tests |
+| Upcoming reminders (`kinforge reminders`) | ✅ Complete | — |
+| GeoJSON place export (`kinforge export geojson`) | ✅ Complete | — |
+| Enhanced statistics (`kinforge report stats --detailed`) | ✅ Complete | — |
+| Interactive TUI browser (`kinforge tui`) | ✅ Complete | — |
 | Plugin API skeleton | ✅ Skeleton present | — |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 50 tests passing, 0 failures, 0 clippy warnings**
+**Total: 90 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -89,15 +108,22 @@ For one person to use Kinforge productively right now:
 - [x] Add people, events, relationships, places, sources, citations via CLI
 - [x] Use flexible genealogical dates: exact, approximate, before, after, or between
 - [x] Link places in a hierarchy (e.g. town → county → state)
-- [x] Edit relationship notes after the fact
-- [x] Run reports on individuals, ancestors (with Ahnentafel numbers), descendants
+- [x] Attach media (photos, documents) to people, events, or sources
+- [x] Run reports on individuals, ancestors (with Ahnentafel numbers), descendants, narrative biography
+- [x] Track research tasks with priorities, statuses, and person links
+- [x] Browse your data interactively with `kinforge tui`
+- [x] Search your database by name, notes, or full-text across all entities
+- [x] Find the relationship path between any two people
 - [x] Export your data to GEDCOM (importable into Ancestry, FamilySearch, etc.)
-- [x] Import a GEDCOM from another program to seed your database
-- [x] Search your database by name, sex, or source title
+- [x] Export a self-contained HTML document for sharing
+- [x] Export a GeoJSON file for mapping places with coordinates
+- [x] Import a GEDCOM from another program to seed your database (duplicates are skipped)
+- [x] See upcoming birthdays and anniversaries with `kinforge reminders`
+- [x] Run data integrity checks with `kinforge check`
 - [x] Override the database path via `--db` flag or `KINFORGE_DB` environment variable
 - [x] Configure backup limits via `~/.config/kinforge/config.toml`
 
-**Kinforge is fully usable today as a single-user CLI genealogy tool with backup protection.**
+**Kinforge is fully usable today as a comprehensive single-user local genealogy tool.**
 
 ---
 
@@ -159,57 +185,59 @@ On first run, Kinforge automatically:
 kinforge person add --given "John" --surname "Smith" --sex male
 kinforge person add --given "Mary" --surname "Jones" --sex female
 
-# List everyone (IDs shown are UUIDs)
+# List everyone (IDs shown are UUIDs; prefix matching works for most commands)
 kinforge person list
 
 # Add a birth event (exact date)
-kinforge event add --person <UUID> --event-type birth --date 1885-06-15 --place "Boston, MA"
-
-# Add a birth event with an approximate year (year-only is accepted)
-kinforge event add --person <UUID> --event-type birth --date 1850 --qualifier approximate
-
-# Add a birth event with a 'before' qualifier
-kinforge event add --person <UUID> --event-type birth --date 1900 --qualifier before
-
-# Add a birth event with a date range
-kinforge event add --person <UUID> --event-type birth --date 1880-01-01 --qualifier between --date2 1885-12-31
+kinforge event add --person <UUID-PREFIX> --event-type birth --date 1885-06-15 --place "Boston, MA"
 
 # Add a source
 kinforge source add --title "1900 US Census" --author "US Census Bureau" --year 1900
 
 # Link event to source
-kinforge citation add --source <SOURCE-UUID> --event <EVENT-UUID> --page "sheet 12" --confidence primary
-
-# Build a place hierarchy
-kinforge place add --name "Suffolk County"
-kinforge place add --name "Boston" --lat 42.3601 --lon -71.0589 --parent <COUNTY-UUID>
+kinforge citation add --source <SRC-PREFIX> --event <EVT-PREFIX> --page "sheet 12" --confidence primary
 
 # Add a parent-child relationship
-kinforge relationship add --person1 <PARENT-UUID> --rel-type parent-child --person2 <CHILD-UUID>
-
-# Add notes to a relationship after the fact
-kinforge relationship update <REL-UUID> --notes "married 14 June 1910, St. Mary's Church"
+kinforge relationship add --person1 <PARENT-PREFIX> --rel-type parent-child --person2 <CHILD-PREFIX>
 
 # Show a full individual report
-kinforge report individual <UUID>
+kinforge report individual <UUID-PREFIX>
 
-# Ancestor chart with Ahnentafel numbers
-kinforge report ancestors <UUID> --generations 5
+# Narrative biography
+kinforge report narrative <UUID-PREFIX>
 
-# Descendant chart with birth years
-kinforge report descendants <UUID>
+# Find how two people are related
+kinforge person path --from <UUID1> --to <UUID2>
 
-# ASCII family tree
-kinforge report tree <UUID> --depth 3
+# Full-text search across all notes, names, sources
+kinforge search fulltext "boston immigration"
 
-# See database statistics
+# Research tasks
+kinforge task add "Find baptism record for John Smith" --priority high --person <UUID-PREFIX>
+kinforge task list
+kinforge task done <TASK-PREFIX>
+
+# Upcoming birthdays and anniversaries (next 30 days)
+kinforge reminders
+kinforge reminders --days 60
+
+# Interactive TUI browser
+kinforge tui
+
+# See statistics (with histogram and top surnames)
 kinforge report stats
+kinforge report stats --detailed
 
-# Export to GEDCOM
+# Export
 kinforge export gedcom my_family.ged
+kinforge export html family.html
+kinforge export geojson places.geojson
 
-# Import a GEDCOM
+# Import
 kinforge import gedcom existing_family.ged
+
+# Run integrity check
+kinforge check
 ```
 
 ---
@@ -234,7 +262,7 @@ No backup is created if the database does not yet exist (first run).
 └── backups/
     ├── kinforge_2026-03-20_09-15-00.db
     ├── kinforge_2026-03-21_14-22-31.db
-    └── kinforge_2026-03-25_08-00-17.db
+    └── kinforge_2026-03-27_08-00-17.db
 ```
 
 On Windows the same structure is under `%APPDATA%\kinforge\`.
@@ -247,10 +275,6 @@ Close Kinforge, then copy the desired backup file over the live database:
 # Linux/macOS
 cp ~/.local/share/kinforge/backups/kinforge_2026-03-21_14-22-31.db \
    ~/.local/share/kinforge/kinforge.db
-
-# Windows (PowerShell)
-Copy-Item "$env:APPDATA\kinforge\backups\kinforge_2026-03-21_14-22-31.db" `
-          "$env:APPDATA\kinforge\kinforge.db"
 ```
 
 ### Configuring backup behaviour
@@ -260,17 +284,6 @@ Edit (or create) `~/.config/kinforge/config.toml`:
 ```toml
 backup_on_open = true   # set false to disable automatic backups
 max_backups    = 20     # keep up to 20 backup files (oldest pruned)
-```
-
-### Using a different database file
-
-```bash
-# Via flag (overrides config)
-kinforge --db /path/to/myproject.db person list
-
-# Via environment variable
-export KINFORGE_DB=/path/to/myproject.db
-kinforge person list
 ```
 
 ---
@@ -287,153 +300,224 @@ Default config file location: `~/.config/kinforge/config.toml` (Linux/macOS) or 
 | `log_level` | `"warn"` | Log verbosity: `"error"`, `"warn"`, `"info"`, `"debug"`, `"trace"` |
 | `default_export_dir` | _(unset)_ | Default directory for exported files |
 
-Example full config file:
-
-```toml
-database_path    = "/home/alice/genealogy/family.db"
-backup_on_open   = true
-max_backups      = 30
-log_level        = "warn"
-default_export_dir = "/home/alice/genealogy/exports"
-```
-
-View current active configuration:
-
-```bash
-kinforge config
-```
-
 ---
 
 ## Full CLI Command Reference
 
-All commands accept `--db <PATH>` (or `KINFORGE_DB` env var) and `--config <PATH>` (or `KINFORGE_CONFIG` env var) as global flags.
+All commands accept `--db <PATH>` (or `KINFORGE_DB` env var) and `--config <PATH>` (or `KINFORGE_CONFIG` env var) as global flags. Most ID arguments accept a UUID prefix (first 8 characters suffice).
 
 ### `person`
 
 ```
 kinforge person add --given <NAME> --surname <NAME> --sex <male|female|unknown> [--notes <TEXT>]
 kinforge person list
-kinforge person show <UUID>
-kinforge person update <UUID> [--sex <SEX>] [--notes <TEXT>]
-kinforge person add-name <UUID> [--given <NAME>] [--surname <NAME>] [--name-type <birth|married|aka|other>]
-kinforge person delete <UUID>
+kinforge person show <ID>
+kinforge person update <ID> [--sex <SEX>] [--notes <TEXT>]
+kinforge person add-name <ID> [--given <NAME>] [--surname <NAME>] [--name-type <birth|married|aka|other>]
+kinforge person delete <ID>
+kinforge person add-adoptive-parent --child <ID> --parent <ID>
+kinforge person add-godparent --godchild <ID> --godparent <ID>
+kinforge person path --from <ID> --to <ID>
 ```
 
 ### `event`
 
 ```
-kinforge event add --person <UUID> --event-type <TYPE> [--date <DATE>] [--qualifier <QUAL>] [--date2 <DATE>] [--place <NAME>] [--notes <TEXT>]
-kinforge event list <PERSON-UUID>
-kinforge event show <UUID>
-kinforge event update <UUID> [--date <DATE>] [--qualifier <QUAL>] [--date2 <DATE>] [--notes <TEXT>]
-kinforge event delete <UUID>
+kinforge event add --person <ID> --event-type <TYPE> [--date <DATE>] [--qualifier <QUAL>] [--date2 <DATE>] [--place <NAME>] [--notes <TEXT>]
+kinforge event list <PERSON-ID>
+kinforge event show <ID>
+kinforge event update <ID> [--date <DATE>] [--qualifier <QUAL>] [--date2 <DATE>] [--notes <TEXT>]
+kinforge event delete <ID>
 ```
 
-**Date formats accepted:** `YYYY-MM-DD`, `YYYY-MM` (expands to 1st of month), `YYYY` (expands to Jan 1)
+**Date formats:** `YYYY-MM-DD`, `YYYY-MM` (1st of month), `YYYY` (Jan 1)
 
-**Date qualifiers (`--qualifier`):**
+**Qualifiers:** `exact` (default) · `approximate`/`abt` · `before`/`bef` · `after`/`aft` · `between`/`bet` (requires `--date2`)
 
-| Value | Meaning | Example |
-|-------|---------|---------|
-| `exact` (default) | Precise known date | `--date 1885-06-15` |
-| `approximate` / `abt` | Roughly this date | `--date 1850 --qualifier approximate` |
-| `before` / `bef` | Known to be before | `--date 1900 --qualifier before` |
-| `after` / `aft` | Known to be after | `--date 1865 --qualifier after` |
-| `between` / `bet` | Date range (requires `--date2`) | `--date 1880 --qualifier between --date2 1885` |
-
-**Event types:** `birth`, `death`, `marriage`, `divorce`, `burial`, `baptism`, `residence`, `occupation`, `education`, `military`, `naturalization`, `census`, `emigration`, `immigration`, or any custom string.
+**Event types:** `birth` · `death` · `marriage` · `divorce` · `burial` · `baptism` · `residence` · `occupation` · `education` · `military` · `naturalization` · `census` · `emigration` · `immigration` · any custom string
 
 ### `relationship`
 
 ```
-kinforge relationship add --person1 <UUID> --rel-type <TYPE> --person2 <UUID> [--notes <TEXT>]
-kinforge relationship show <UUID>
-kinforge relationship list <PERSON-UUID>
-kinforge relationship update <UUID> [--notes <TEXT>]
-kinforge relationship delete <UUID>
+kinforge relationship add --person1 <ID> --rel-type <TYPE> --person2 <ID> [--notes <TEXT>]
+kinforge relationship show <ID>
+kinforge relationship list <PERSON-ID>
+kinforge relationship update <ID> [--notes <TEXT>]
+kinforge relationship delete <ID>
 ```
 
-Relationship types: `parent-child`, `spouse`, `sibling`.
+**Relationship types:** `parent-child` · `spouse` · `sibling` · `adoptive-parent` · `godparent` · `half-sibling` · `step-parent` · `foster`
 
-For `parent-child`: `--person1` is the **parent**, `--person2` is the **child**.
+For `parent-child`/`adoptive-parent`/`step-parent`/`foster`: `--person1` is the **parent** role, `--person2` is the **child** role.
 
 ### `place`
 
 ```
-kinforge place add --name <NAME> [--lat <DECIMAL>] [--lon <DECIMAL>] [--parent <UUID>]
+kinforge place add --name <NAME> [--lat <DECIMAL>] [--lon <DECIMAL>] [--parent <ID>]
 kinforge place list
-kinforge place show <UUID>
-kinforge place update <UUID> [--name <NAME>] [--lat <DECIMAL>] [--lon <DECIMAL>] [--parent <UUID>]
-kinforge place delete <UUID>
+kinforge place show <ID>
+kinforge place update <ID> [--name <NAME>] [--lat <DECIMAL>] [--lon <DECIMAL>] [--parent <ID>]
+kinforge place delete <ID>
 ```
-
-Build hierarchies with `--parent`: add a county first, then add towns with `--parent <COUNTY-UUID>`. The `place show` and `place list` commands display the parent name.
-
-Latitude must be −90..90; longitude must be −180..180.
 
 ### `source`
 
 ```
 kinforge source add --title <TITLE> [--author <NAME>] [--publication <TEXT>] [--year <YEAR>] [--notes <TEXT>]
 kinforge source list
-kinforge source show <UUID>
-kinforge source update <UUID> [--title <T>] [--author <A>] [--year <Y>] [--notes <N>]
-kinforge source delete <UUID>
+kinforge source show <ID>
+kinforge source update <ID> [--title <T>] [--author <A>] [--year <Y>] [--notes <N>]
+kinforge source delete <ID>
 ```
 
 ### `citation`
 
 ```
-kinforge citation add --source <UUID> --event <UUID> [--page <TEXT>] --confidence <LEVEL> [--notes <TEXT>]
-kinforge citation list --event <UUID>
-kinforge citation update <UUID> [--page <TEXT>] [--confidence <LEVEL>] [--notes <TEXT>]
-kinforge citation delete <UUID>
+kinforge citation add --source <ID> --event <ID> [--page <TEXT>] --confidence <LEVEL> [--notes <TEXT>]
+kinforge citation list --event <ID>
+kinforge citation update <ID> [--page <TEXT>] [--confidence <LEVEL>] [--notes <TEXT>]
+kinforge citation delete <ID>
 ```
 
-Confidence levels: `unreliable`, `questionable`, `secondary`, `primary`, `direct`.
+**Confidence levels:** `unreliable` · `questionable` · `secondary` · `primary` · `direct`
+
+### `media`
+
+```
+kinforge media add --title <TITLE> --type <photo|document|audio|video|other> [--path <FILE>] [--description <TEXT>]
+kinforge media list
+kinforge media show <ID>
+kinforge media update <ID> [--title <T>] [--description <D>]
+kinforge media delete <ID>
+kinforge media attach <MEDIA-ID> --entity-type <person|event|source> --entity-id <ID>
+kinforge media detach <LINK-ID>
+kinforge media for-person <PERSON-ID>
+kinforge media for-event <EVENT-ID>
+```
+
+### `task`
+
+```
+kinforge task add <DESCRIPTION> [--priority <low|medium|high>] [--person <ID>] [--notes <TEXT>]
+kinforge task list [--status <pending|in-progress|done>] [--priority <low|medium|high>] [--person <ID>]
+kinforge task show <ID>
+kinforge task update <ID> [--description <D>] [--priority <P>] [--status <S>] [--notes <N>] [--person <ID>] [--clear-person]
+kinforge task start <ID>
+kinforge task done <ID>
+kinforge task delete <ID>
+```
 
 ### `report`
 
 ```
-kinforge report stats
+kinforge report stats [--detailed]
 kinforge report people
-kinforge report individual <UUID>
-kinforge report ancestors <UUID> [--generations <N>]     # Ahnentafel numbered, default: 4 gen
-kinforge report descendants <UUID> [--generations <N>]  # shows birth years, default: 4 gen
-kinforge report tree <UUID> [--depth <N>]               # ASCII tree, default depth: 3
+kinforge report individual <ID>
+kinforge report ancestors <ID> [--generations <N>]
+kinforge report descendants <ID> [--generations <N>]
+kinforge report tree <ID> [--depth <N>]
+kinforge report ancestor-tree <ID> [--depth <N>]
+kinforge report family <ID>
+kinforge report timeline <ID>
+kinforge report sources
+kinforge report narrative <ID>
 ```
 
-**Ahnentafel numbering** in ancestor report: subject = 1, father = 2, mother = 3, paternal grandfather = 4, paternal grandmother = 5, etc.
+`--detailed` adds a birth-decade histogram and top-10 surname frequency table.
 
 ### `search`
 
 ```
 kinforge search people <QUERY> [--sex <male|female|unknown>]
 kinforge search sources <QUERY> [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search fulltext <QUERY>
 ```
 
 ### `export`
 
 ```
-kinforge export gedcom <OUTPUT-FILE>
-kinforge export json <OUTPUT-FILE>
+kinforge export gedcom <OUTPUT>
+kinforge export json <OUTPUT>
+kinforge export csv <OUTPUT>
+kinforge export html <OUTPUT>
+kinforge export geojson <OUTPUT>
 ```
 
 ### `import`
 
 ```
-kinforge import gedcom <INPUT-FILE>
-kinforge import json <INPUT-FILE>
+kinforge import gedcom <INPUT>
+kinforge import json <INPUT>
 ```
 
-Import is additive — existing records are not deleted.
+Import is additive — existing records are not deleted. GEDCOM import skips people with the same name + birth year already in the database. Both GEDCOM and JSON imports print a summary of records added (people, events, sources, relationships, places).
+
+### `reminders`
+
+```
+kinforge reminders [--days <N>]     # default: 30 days ahead
+```
+
+Shows upcoming birthdays (Birth events) and anniversaries (Marriage events).
+
+### `backup`
+
+```
+kinforge backup list
+kinforge backup create
+```
+
+`backup list` shows all backup files for the current database (newest first) with file name, size, and path.
+`backup create` immediately copies the database to the backups directory, respecting the `max_backups` rotation setting.
+
+Backups are stored in a `backups/` subdirectory next to the database file, named `<stem>_<timestamp>.db`.
+
+### `check`
+
+```
+kinforge check
+```
+
+Reports duplicate people (same name), orphaned citations, and other integrity issues.
 
 ### `config`
 
 ```
-kinforge config
+kinforge config show
+kinforge config init
+kinforge config set <KEY> <VALUE>
 ```
+
+### `tui`
+
+```
+kinforge tui
+```
+
+Opens an interactive terminal UI with four tabs:
+
+| Tab | Content |
+|-----|---------|
+| **People** | Scrollable list with birth years; `/` to filter by name; `Enter` for detail panel showing events and relationships |
+| **Tasks** | Scrollable list grouped by status (In Progress → Pending → Done); shows priority badge and strikethrough for done tasks |
+| **Sources** | Scrollable list with citation counts; `Enter` for citation detail panel showing linked events |
+| **Stats** | Database record counts and database file path |
+
+**Key bindings:**
+
+| Key | Context | Effect |
+|-----|---------|--------|
+| `Tab` / `Shift-Tab` | Any | Switch tabs |
+| `↑` / `↓` or `k` / `j` | Any | Navigate list or scroll detail panel |
+| `n` | People | Open inline popup to create a new person |
+| `/` | People | Enter search/filter mode |
+| `Esc` | Search / detail panel | Cancel search or close detail panel |
+| `Enter` | People, Sources | Open detail panel; close if already open |
+| `d` / `c` | Tasks | Mark selected task as Done |
+| `n` | Tasks | Open inline input to create a new task |
+| `p` | Tasks | Cycle selected task's priority (Low → Medium → High → Low) |
+| `x` | Tasks | Delete selected task |
+| `q` or `Ctrl+C` | Any | Quit |
 
 ---
 
@@ -443,9 +527,11 @@ kinforge config
 
 Kinforge uses a `schema_version` table in the database. On every open, it checks the current schema version and applies any pending migrations in order. Migrations are append-only — they add new columns or tables but never drop existing data.
 
+Currently at schema version 4 (people, events, places, relationships, sources, citations, media, FTS index, research tasks).
+
 ### Backup guarantee
 
-With default settings (`backup_on_open = true`, `max_backups = 10`), you have up to 10 timestamped snapshots. As long as you run Kinforge at least once every 10 days, you always have a full history going back 10 runs. Increase `max_backups` for longer retention.
+With default settings (`backup_on_open = true`, `max_backups = 10`), you have up to 10 timestamped snapshots. Increase `max_backups` for longer retention.
 
 ### Export as an additional safety net
 
@@ -461,18 +547,27 @@ The database runs in Write-Ahead Logging (WAL) mode for better concurrency and c
 
 ```
 kinforge_core          — domain models, types, error type, validation
-kinforge_storage       — SQLite persistence (rusqlite), schema migrations
+kinforge_storage       — SQLite persistence (rusqlite), schema migrations (v1–v4), FTS5
 kinforge_config        — TOML config file, XDG path resolution
-kinforge_query         — in-memory query builder over storage
+kinforge_query         — fluent query builders (PersonQuery, EventQuery, SourceQuery)
 kinforge_import_export — GEDCOM 5.5 parser/writer, JSON import/export
-kinforge_reports       — text report generators (individual, Ahnentafel ancestors, descendants)
-kinforge_viz           — ASCII tree renderer
-kinforge_app           — high-level Application facade (used by CLI and tests)
-kinforge_cli           — clap-based command-line interface (the binary)
+kinforge_reports       — text report generators (individual, ancestors, narrative, HTML)
+kinforge_viz           — ASCII tree renderers (family tree, ancestor tree)
+kinforge_app           — Application facade: CRUD, search, tasks, path-finding, integrity
+kinforge_cli           — clap CLI (binary) + ratatui TUI
 kinforge_plugin_api    — plugin trait skeleton (future extensibility)
 kinforge_sync          — sync/replication skeleton (not yet implemented)
 kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 ```
+
+### Schema versions
+
+| Version | Tables added |
+|---------|-------------|
+| 1 | `people`, `person_names`, `places`, `events`, `relationships`, `sources`, `citations` |
+| 2 | `media`, `media_links` |
+| 3 | `fts_index` (FTS5 virtual table) |
+| 4 | `research_tasks` |
 
 ---
 
@@ -480,31 +575,29 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 
 | Feature | Notes |
 |---------|-------|
-| Desktop GUI | `kinforge_ui_desktop` skeleton only; no UI framework chosen |
-| Cloud/peer sync | `kinforge_sync` skeleton only |
-| Plugin loading | Trait defined; no loader or host yet |
-| Duplicate detection on GEDCOM import | Import is purely additive |
-| In-place name editing | Delete and re-add name entries as workaround |
-| Media/document attachments | Not in schema |
-| Full-text notes search | Not yet implemented |
-| Interactive TUI | Not yet implemented |
+| Desktop GUI | `kinforge_ui_desktop` stub only; no UI framework chosen |
+| Cloud/peer sync | `kinforge_sync` stub only |
+| Plugin loading | Trait defined; no loader or host |
+| In-place name editing | `person update-name` / `person delete-name` commands available |
 
 ---
 
 ## Roadmap
 
-**Near-term:**
-- [ ] Duplicate detection / merge on GEDCOM import
-- [ ] Additional report formats: Ahnentafel chart as printable table, family group sheet
-- [ ] In-place name editing (`person update-name <person-uuid> <name-index> --given X`)
-- [ ] Full-text notes search across all entities
+**Completed (recent):**
+- [x] `kinforge person update-name` / `delete-name` — edit name entries in place
+- [x] `kinforge_app::db` fully private — all access via `Application::database()` accessor
+- [x] TUI: Sources tab with citation detail panel
+- [x] TUI: task quick-complete (`d`/`c`), new task (`n`), priority cycle (`p`), delete (`x`)
 
-**Medium-term:**
-- [ ] Interactive TUI (terminal user interface) using `ratatui`
-- [ ] Media attachment support (link filenames to records)
-- [ ] `kinforge_app::db` made fully private (all access through Application methods)
+**Near-term (v1.0.0 — complete):**
+- [x] JSON import statistics (people, events, sources, relationships, places counts)
+- [x] TUI: inline person creation (People tab, `n` key, two-field popup)
+- [x] `kinforge backup list/create` — manual backup management CLI
+- [x] TUI Stats tab: research task breakdown with progress bar
+- [x] `BackupInfo` API + `Application::backup_now()` / `list_backups()`
 
-**Long-term:**
+**Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)
 - [ ] Optional sync between devices (`kinforge_sync`)
 - [ ] Plugin loading at runtime (`kinforge_plugin_api`)

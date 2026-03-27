@@ -93,6 +93,22 @@ pub enum PersonCommands {
         #[arg(long)]
         notes: Option<String>,
     },
+    /// Record an adoptive-parent relationship
+    AddAdoptiveParent {
+        id: String,
+        #[arg(long)]
+        parent: String,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Record a godparent relationship
+    AddGodparent {
+        id: String,
+        #[arg(long)]
+        godparent: String,
+        #[arg(long)]
+        notes: Option<String>,
+    },
     /// Merge another person (--from) into this one, then delete the duplicate
     Merge {
         /// Target person: the one to keep (ID or short prefix)
@@ -100,6 +116,15 @@ pub enum PersonCommands {
         /// Source person: the duplicate to merge in and delete (ID or short prefix)
         #[arg(long)]
         from: String,
+    },
+    /// Find the shortest relationship path between two people
+    Path {
+        /// Starting person (ID or prefix)
+        #[arg(long)]
+        from: String,
+        /// Ending person (ID or prefix)
+        #[arg(long)]
+        to: String,
     },
     /// Delete a person (also deletes their events and relationships)
     Delete { id: String },
@@ -185,7 +210,7 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
 
         PersonCommands::Show { id } => {
             let pid = app.resolve_person_id(&id)?;
-            let report = individual_report(&app.db, &pid)?;
+            let report = individual_report(app.database(), &pid)?;
             print!("{}", report);
         }
 
@@ -374,6 +399,46 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
             );
         }
 
+        PersonCommands::AddAdoptiveParent { id, parent, notes } => {
+            let child_id = app.resolve_person_id(&id)?;
+            let parent_id = app.resolve_person_id(&parent)?;
+            let child_name = app.get_person(&child_id)?.display_name();
+            let parent_name = app.get_person(&parent_id)?.display_name();
+            app.add_relationship(
+                kinforge_core::models::RelationshipType::AdoptiveParent,
+                parent_id,
+                child_id,
+                notes.as_deref(),
+            )?;
+            println!(
+                "{} {} {} {}",
+                "Linked:".green().bold(),
+                parent_name.bold(),
+                "\u{2192} adoptive parent of \u{2192}".bright_black(),
+                child_name.bold()
+            );
+        }
+
+        PersonCommands::AddGodparent { id, godparent, notes } => {
+            let child_id = app.resolve_person_id(&id)?;
+            let gp_id = app.resolve_person_id(&godparent)?;
+            let child_name = app.get_person(&child_id)?.display_name();
+            let gp_name = app.get_person(&gp_id)?.display_name();
+            app.add_relationship(
+                kinforge_core::models::RelationshipType::Godparent,
+                gp_id,
+                child_id,
+                notes.as_deref(),
+            )?;
+            println!(
+                "{} {} {} {}",
+                "Linked:".green().bold(),
+                gp_name.bold(),
+                "\u{2192} godparent of \u{2192}".bright_black(),
+                child_name.bold()
+            );
+        }
+
         PersonCommands::Merge { id, from } => {
             let target_id = app.resolve_person_id(&id)?;
             let source_id = app.resolve_person_id(&from)?;
@@ -388,6 +453,40 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 "\u{2014}".bright_black(),
                 format!("{} name(s), kept target ID", merged.names.len()).bright_black()
             );
+        }
+
+        PersonCommands::Path { from, to } => {
+            let from_id = app.resolve_person_id(&from)?;
+            let to_id = app.resolve_person_id(&to)?;
+            let from_name = app.get_person(&from_id)?.display_name();
+            let to_name = app.get_person(&to_id)?.display_name();
+            match app.find_relationship_path(&from_id, &to_id)? {
+                None => {
+                    println!(
+                        "{} {} {} {}",
+                        "No relationship path found between".bright_black(),
+                        from_name.bold(),
+                        "and".bright_black(),
+                        to_name.bold()
+                    );
+                }
+                Some(path) => {
+                    let hops = path.steps.len().saturating_sub(1);
+                    println!(
+                        "{} {} {} {} {} {}\n",
+                        "Path:".bold().bright_cyan(),
+                        from_name.bold(),
+                        "\u{2192}".bright_black(),
+                        to_name.bold(),
+                        format!("({} hop{})", hops, if hops == 1 { "" } else { "s" })
+                            .bright_black(),
+                        ""
+                    );
+                    for line in path.describe() {
+                        println!("  {}", line);
+                    }
+                }
+            }
         }
 
         PersonCommands::Delete { id } => {

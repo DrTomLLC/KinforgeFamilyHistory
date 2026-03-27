@@ -24,7 +24,7 @@ pub fn handle(cmd: ImportCommands, app: &Application) -> Result<()> {
     match cmd {
         ImportCommands::Gedcom { input } => {
             let content = std::fs::read_to_string(&input)?;
-            let stats = import_gedcom(&content, &app.db)?;
+            let stats = import_gedcom(&content, app.database())?;
             println!(
                 "{} {} {} {}, {}, {}",
                 "Imported GEDCOM from".green().bold(),
@@ -45,12 +45,27 @@ pub fn handle(cmd: ImportCommands, app: &Application) -> Result<()> {
         ImportCommands::Json { input } => {
             let file = File::open(&input)?;
             let mut reader = BufReader::new(file);
-            import_json(&app.db, &mut reader)?;
+            let stats = import_json(app.database(), &mut reader)?;
             println!(
-                "{} {}",
+                "{} {} {} {}, {}, {}, {}",
                 "Imported JSON from".green().bold(),
-                input.bold()
+                input.bold(),
+                "\u{2014}".bright_black(),
+                format!("{} people", stats.people).bold(),
+                format!("{} events", stats.events).bold(),
+                format!("{} sources", stats.sources).bold(),
+                "added".bright_black()
             );
+            if stats.places > 0 || stats.relationships > 0 {
+                println!(
+                    "  {}",
+                    format!(
+                        "{} place(s), {} relationship(s) imported",
+                        stats.places, stats.relationships
+                    )
+                    .bright_black()
+                );
+            }
         }
     }
     Ok(())

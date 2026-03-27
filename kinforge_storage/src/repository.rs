@@ -9,6 +9,17 @@ use crate::migrations::run_migrations;
 /// Column tuple returned by relationship SQL queries.
 type RelRow = (String, String, String, String, Option<String>);
 
+/// A single result from a full-text search.
+#[derive(Debug, Clone)]
+pub struct FtsResult {
+    /// The entity class: "person", "event", "source", or "place"
+    pub entity_type: String,
+    /// UUID of the matching entity
+    pub entity_id: String,
+    /// Context snippet from the matching body text (raw, no highlight markers)
+    pub snippet: String,
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -1003,6 +1014,408 @@ impl Database {
             citations,
             relationships,
             places,
+        })
+    }
+
+    // ── Full-text search (FTS5) ──────────────────────────────────────────────
+
+    /// Rebuild the FTS5 index from all current data. Fast for typical databases.
+    pub fn rebuild_fts_index(&self) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM fts_index", [])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Person names
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT TRIM(COALESCE(given,'') || ' ' || COALESCE(surname,'')),
+                        'person', person_id
+                 FROM person_names
+                 WHERE given IS NOT NULL OR surname IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Person notes
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT notes, 'person', id FROM people WHERE notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Event notes
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT notes, 'event', id FROM events WHERE notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Source titles + authors
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT TRIM(title || ' ' || COALESCE(author,'')), 'source', id FROM sources",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Source notes
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT notes, 'source', id FROM sources WHERE notes IS NOT NULL",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Place names
+        self.conn
+            .execute_batch(
+                "INSERT INTO fts_index(body, entity_type, entity_id)
+                 SELECT name, 'place', id FROM places",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Search all indexed text using FTS5. Rebuilds index before querying.
+    /// Returns results ordered by relevance (best match first).
+    pub fn search_fulltext(&self, query: &str) -> KinforgeResult<Vec<FtsResult>> {
+        self.rebuild_fts_index()?;
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT entity_type, entity_id, body
+                 FROM fts_index
+                 WHERE fts_index MATCH ?1
+                 ORDER BY rank
+                 LIMIT 100",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![query], |row| {
+                Ok(FtsResult {
+                    entity_type: row.get(0)?,
+                    entity_id: row.get(1)?,
+                    snippet: row.get(2)?,
+                })
+            })
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    // ── Media ────────────────────────────────────────────────────────────────
+
+    pub fn insert_media(&self, media: &Media) -> KinforgeResult<()> {
+        self.conn
+            .execute(
+                "INSERT INTO media (id, title, path, url, media_type, description, date)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    media.id.as_str(),
+                    media.title,
+                    media.path,
+                    media.url,
+                    media.media_type.to_string(),
+                    media.description,
+                    media.date,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_media(&self, media: &Media) -> KinforgeResult<()> {
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE media SET title=?2, path=?3, url=?4, media_type=?5, description=?6, date=?7
+                 WHERE id=?1",
+                params![
+                    media.id.as_str(),
+                    media.title,
+                    media.path,
+                    media.url,
+                    media.media_type.to_string(),
+                    media.description,
+                    media.date,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        if affected == 0 {
+            return Err(KinforgeError::NotFound {
+                entity_type: "Media".to_string(),
+                id: media.id.as_str(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn delete_media(&self, id: &MediaId) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM media WHERE id = ?1", params![id.as_str()])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_media(&self, id: &MediaId) -> KinforgeResult<Media> {
+        self.conn
+            .query_row(
+                "SELECT id, title, path, url, media_type, description, date FROM media WHERE id=?1",
+                params![id.as_str()],
+                Self::row_to_media,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => KinforgeError::NotFound {
+                    entity_type: "Media".to_string(),
+                    id: id.as_str(),
+                },
+                other => KinforgeError::Storage(other.to_string()),
+            })
+    }
+
+    pub fn list_media(&self) -> KinforgeResult<Vec<Media>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, title, path, url, media_type, description, date FROM media ORDER BY title",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], Self::row_to_media)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    fn row_to_media(row: &rusqlite::Row<'_>) -> rusqlite::Result<Media> {
+        let media_type_str: String = row.get(4)?;
+        let media_type = media_type_str.parse::<MediaType>().unwrap_or(MediaType::Other);
+        Ok(Media {
+            id: MediaId::from_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+            title: row.get(1)?,
+            path: row.get(2)?,
+            url: row.get(3)?,
+            media_type,
+            description: row.get(5)?,
+            date: row.get(6)?,
+        })
+    }
+
+    // ── Media Links ──────────────────────────────────────────────────────────
+
+    pub fn insert_media_link(&self, link: &MediaLink) -> KinforgeResult<()> {
+        self.conn
+            .execute(
+                "INSERT INTO media_links (id, media_id, entity_type, entity_id)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    link.id.as_str(),
+                    link.media_id.as_str(),
+                    link.entity_type.to_string(),
+                    link.entity_id,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn delete_media_link(&self, id: &MediaLinkId) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM media_links WHERE id=?1", params![id.as_str()])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_media_links_for_media(&self, media_id: &MediaId) -> KinforgeResult<Vec<MediaLink>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, media_id, entity_type, entity_id
+                 FROM media_links WHERE media_id=?1",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![media_id.as_str()], Self::row_to_media_link)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    pub fn list_media_for_entity(
+        &self,
+        entity_type: &MediaEntityType,
+        entity_id: &str,
+    ) -> KinforgeResult<Vec<Media>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT m.id, m.title, m.path, m.url, m.media_type, m.description, m.date
+                 FROM media m
+                 JOIN media_links ml ON ml.media_id = m.id
+                 WHERE ml.entity_type = ?1 AND ml.entity_id = ?2
+                 ORDER BY m.title",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(
+                params![entity_type.to_string(), entity_id],
+                Self::row_to_media,
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    fn row_to_media_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaLink> {
+        let entity_type_str: String = row.get(2)?;
+        let entity_type = entity_type_str
+            .parse::<MediaEntityType>()
+            .unwrap_or(MediaEntityType::Person);
+        Ok(MediaLink {
+            id: MediaLinkId::from_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+            media_id: MediaId::from_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+            entity_type,
+            entity_id: row.get(3)?,
+        })
+    }
+
+    // ── Research Tasks ───────────────────────────────────────────────────────
+
+    pub fn insert_task(&self, task: &Task) -> KinforgeResult<()> {
+        self.conn
+            .execute(
+                "INSERT INTO research_tasks
+                 (id, description, person_id, priority, status, notes, created, updated)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    task.id.as_str(),
+                    task.description,
+                    task.person_id.as_ref().map(|p| p.as_str()),
+                    task.priority.to_string(),
+                    task.status.to_string(),
+                    task.notes,
+                    task.created,
+                    task.updated,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_task(&self, task: &Task) -> KinforgeResult<()> {
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE research_tasks
+                 SET description=?2, person_id=?3, priority=?4, status=?5,
+                     notes=?6, updated=?7
+                 WHERE id=?1",
+                params![
+                    task.id.as_str(),
+                    task.description,
+                    task.person_id.as_ref().map(|p| p.as_str()),
+                    task.priority.to_string(),
+                    task.status.to_string(),
+                    task.notes,
+                    task.updated,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        if affected == 0 {
+            return Err(KinforgeError::NotFound {
+                entity_type: "Task".to_string(),
+                id: task.id.as_str(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn delete_task(&self, id: &TaskId) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM research_tasks WHERE id=?1", params![id.as_str()])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_task(&self, id: &TaskId) -> KinforgeResult<Task> {
+        self.conn
+            .query_row(
+                "SELECT id,description,person_id,priority,status,notes,created,updated
+                 FROM research_tasks WHERE id=?1",
+                params![id.as_str()],
+                Self::row_to_task,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => KinforgeError::NotFound {
+                    entity_type: "Task".to_string(),
+                    id: id.as_str(),
+                },
+                other => KinforgeError::Storage(other.to_string()),
+            })
+    }
+
+    pub fn list_tasks(&self) -> KinforgeResult<Vec<Task>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id,description,person_id,priority,status,notes,created,updated
+                 FROM research_tasks
+                 ORDER BY CASE status WHEN 'InProgress' THEN 0 WHEN 'Pending' THEN 1 ELSE 2 END,
+                          CASE priority WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END,
+                          created",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], Self::row_to_task)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    pub fn list_tasks_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Task>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id,description,person_id,priority,status,notes,created,updated
+                 FROM research_tasks WHERE person_id=?1
+                 ORDER BY created",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![person_id.as_str()], Self::row_to_task)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+        let priority: TaskPriority = row
+            .get::<_, String>(3)?
+            .parse()
+            .unwrap_or(TaskPriority::Medium);
+        let status: TaskStatus = row
+            .get::<_, String>(4)?
+            .parse()
+            .unwrap_or(TaskStatus::Pending);
+        let person_id_str: Option<String> = row.get(2)?;
+        let person_id = person_id_str
+            .as_deref()
+            .and_then(|s| PersonId::from_str(s).ok());
+        Ok(Task {
+            id: TaskId::from_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+            description: row.get(1)?,
+            person_id,
+            priority,
+            status,
+            notes: row.get(5)?,
+            created: row.get(6)?,
+            updated: row.get(7)?,
         })
     }
 }

@@ -142,13 +142,42 @@ fn describe_relationship(
     person1: &PersonId,
 ) -> &'static str {
     match rel_type {
-        RelationshipType::Spouse => "Spouse:    ",
-        RelationshipType::Sibling => "Sibling:   ",
+        RelationshipType::Spouse => "Spouse:      ",
+        RelationshipType::Sibling => "Sibling:     ",
+        RelationshipType::HalfSibling => "Half-sibling:",
         RelationshipType::ParentChild => {
             if subject == person1 {
-                "Parent of: "
+                "Parent of:   "
             } else {
-                "Child of:  "
+                "Child of:    "
+            }
+        }
+        RelationshipType::AdoptiveParent => {
+            if subject == person1 {
+                "Adopted:     "
+            } else {
+                "Adoptive par:"
+            }
+        }
+        RelationshipType::Godparent => {
+            if subject == person1 {
+                "Godparent of:"
+            } else {
+                "Godchild of: "
+            }
+        }
+        RelationshipType::StepParent => {
+            if subject == person1 {
+                "Step-parent: "
+            } else {
+                "Step-child:  "
+            }
+        }
+        RelationshipType::Foster => {
+            if subject == person1 {
+                "Fostered:    "
+            } else {
+                "Foster par:  "
             }
         }
     }
@@ -598,4 +627,487 @@ pub fn sources_report(db: &Database) -> KinforgeResult<String> {
         ));
     }
     Ok(out)
+}
+
+// ─── narrative report ────────────────────────────────────────────────────────
+
+/// Generate a prose-style narrative biography for a person.
+pub fn narrative_report(db: &Database, person_id: &PersonId) -> KinforgeResult<String> {
+    use kinforge_core::models::EventType;
+
+    let person = db.get_person(person_id)?;
+    let name = person.display_name();
+    let events = db.list_events_for_person(person_id)?;
+    let relationships = db.list_relationships_for_person(person_id)?;
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "\n{}\n{}\n\n",
+        format!("  Narrative Biography: {}  ", name)
+            .bold()
+            .bright_cyan()
+            .on_black(),
+        "─".repeat(60).bright_black()
+    ));
+
+    // Helper: get event of given type
+    let get_event = |etype: EventType| {
+        events.iter().find(|e| e.event_type == etype).cloned()
+    };
+
+    // ── Birth sentence ────────────────────────────────────────────────────
+    let birth = get_event(EventType::Birth);
+    let baptism = get_event(EventType::Baptism);
+
+    let pronoun = match person.sex {
+        kinforge_core::models::Sex::Male => "He",
+        kinforge_core::models::Sex::Female => "She",
+        kinforge_core::models::Sex::Unknown => "They",
+    };
+
+    if let Some(ref b) = birth {
+        let date_str = b.date.as_ref().map(format_date_prose).unwrap_or_default();
+        let place_str = if let Some(ref pid) = b.place_id {
+            db.get_place(pid)
+                .ok()
+                .map(|p| format!(" in {}", p.name))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "{} was born{}{}.  ",
+            name.bold(),
+            if date_str.is_empty() { String::new() } else { format!(" {}", date_str) },
+            place_str
+        ));
+    } else {
+        out.push_str(&format!("{} was born on an unknown date.  ", name.bold()));
+    }
+
+    if let Some(ref bap) = baptism {
+        let date_str = bap.date.as_ref().map(format_date_prose).unwrap_or_default();
+        let place_str = if let Some(ref pid) = bap.place_id {
+            db.get_place(pid)
+                .ok()
+                .map(|p| format!(" at {}", p.name))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "{} was baptised{}{}.",
+            pronoun,
+            if date_str.is_empty() { String::new() } else { format!(" {}", date_str) },
+            place_str
+        ));
+    }
+    out.push('\n');
+
+    // ── Parents ───────────────────────────────────────────────────────────
+    let parent_rels: Vec<_> = relationships
+        .iter()
+        .filter(|r| {
+            (r.rel_type == kinforge_core::models::RelationshipType::ParentChild
+                || r.rel_type == kinforge_core::models::RelationshipType::AdoptiveParent)
+                && r.person2_id == *person_id
+        })
+        .collect();
+
+    if !parent_rels.is_empty() {
+        let parent_names: Vec<String> = parent_rels
+            .iter()
+            .filter_map(|r| {
+                db.get_person(&r.person1_id)
+                    .ok()
+                    .map(|p| {
+                        if r.rel_type == kinforge_core::models::RelationshipType::AdoptiveParent {
+                            format!("{} (adoptive)", p.display_name())
+                        } else {
+                            p.display_name()
+                        }
+                    })
+            })
+            .collect();
+        out.push_str(&format!(
+            "{} was the child of {}.\n",
+            pronoun,
+            join_names(&parent_names)
+        ));
+    }
+
+    // ── Marriages ─────────────────────────────────────────────────────────
+    let spouse_rels: Vec<_> = relationships
+        .iter()
+        .filter(|r| r.rel_type == kinforge_core::models::RelationshipType::Spouse)
+        .collect();
+
+    for rel in &spouse_rels {
+        let spouse_id = if rel.person1_id == *person_id {
+            &rel.person2_id
+        } else {
+            &rel.person1_id
+        };
+        if let Ok(spouse) = db.get_person(spouse_id) {
+            // Look for marriage event near this — for simplicity, emit a generic sentence
+            out.push_str(&format!(
+                "{} married {}.\n",
+                pronoun,
+                spouse.display_name().bold()
+            ));
+        }
+    }
+
+    // ── Children ──────────────────────────────────────────────────────────
+    let child_rels: Vec<_> = relationships
+        .iter()
+        .filter(|r| {
+            r.rel_type == kinforge_core::models::RelationshipType::ParentChild
+                && r.person1_id == *person_id
+        })
+        .collect();
+
+    if !child_rels.is_empty() {
+        let child_names: Vec<String> = child_rels
+            .iter()
+            .filter_map(|r| db.get_person(&r.person2_id).ok().map(|p| p.display_name()))
+            .collect();
+        let count = child_names.len();
+        out.push_str(&format!(
+            "{} had {} {}: {}.\n",
+            pronoun,
+            count,
+            if count == 1 { "child" } else { "children" },
+            join_names(&child_names)
+        ));
+    }
+
+    // ── Other events (excluding Birth/Baptism) ────────────────────────────
+    let mut other_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e.event_type,
+                EventType::Birth | EventType::Baptism
+            )
+        })
+        .collect();
+    other_events.sort_by(|a, b| {
+        let key = |e: &&kinforge_core::models::Event| -> i32 {
+            e.date.as_ref().and_then(|d| {
+                use kinforge_core::models::EventDate;
+                use chrono::Datelike;
+                match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                    _ => None,
+                }
+            }).unwrap_or(i32::MAX)
+        };
+        key(a).cmp(&key(b))
+    });
+
+    for event in &other_events {
+        let date_str = event.date.as_ref().map(format_date_prose).unwrap_or_default();
+        let place_str = if let Some(ref pid) = event.place_id {
+            db.get_place(pid)
+                .ok()
+                .map(|p| format!(" in {}", p.name))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let event_verb = match event.event_type {
+            EventType::Death => format!("{} died{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            EventType::Burial => format!("{} was buried{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            EventType::Marriage => format!("{} married{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            EventType::Divorce => format!("{} was divorced{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }),
+            EventType::Emigration => format!("{} emigrated{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            EventType::Immigration => format!("{} immigrated{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            EventType::Census => format!("{} appeared in a census{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            EventType::Occupation => {
+                let desc = event.notes.as_deref().unwrap_or("unknown occupation");
+                format!("{} worked as {}", pronoun, desc)
+            }
+            EventType::Residence => format!("{} resided{}{}", pronoun, if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+            ref other => format!("{} [{}]{}{}", pronoun, format!("{:?}", other).to_lowercase(), if date_str.is_empty() { String::new() } else { format!(" {}", date_str) }, place_str),
+        };
+        let notes_str = event
+            .notes
+            .as_deref()
+            .filter(|_| event.event_type != EventType::Occupation)
+            .map(|n| format!(" ({})", n))
+            .unwrap_or_default();
+        out.push_str(&format!("{}{}.\n", event_verb, notes_str));
+    }
+
+    // ── Notes ─────────────────────────────────────────────────────────────
+    if let Some(ref notes) = person.notes {
+        out.push('\n');
+        out.push_str(&format!("{} {}\n", "Notes:".cyan(), notes));
+    }
+
+    out.push_str(&format!("\n{}\n", "─".repeat(60).bright_black()));
+    Ok(out)
+}
+
+fn format_date_prose(date: &EventDate) -> String {
+    match date {
+        EventDate::Exact(nd) => format!("on {}", nd.format("%d %B %Y")),
+        EventDate::Approximate(nd) => format!("around {}", nd.format("%Y")),
+        EventDate::Before(nd) => format!("before {}", nd.format("%Y")),
+        EventDate::After(nd) => format!("after {}", nd.format("%Y")),
+        EventDate::Between(nd1, nd2) => {
+            format!("between {} and {}", nd1.format("%Y"), nd2.format("%Y"))
+        }
+        EventDate::Unknown => String::new(),
+    }
+}
+
+fn join_names(names: &[String]) -> String {
+    match names.len() {
+        0 => String::new(),
+        1 => names[0].clone(),
+        2 => format!("{} and {}", names[0], names[1]),
+        _ => {
+            let (last, rest) = names.split_last().unwrap();
+            format!("{}, and {}", rest.join(", "), last)
+        }
+    }
+}
+
+// ─── HTML export ─────────────────────────────────────────────────────────────
+
+const HTML_CSS: &str = r#"
+  body{font-family:Georgia,'Times New Roman',serif;max-width:1100px;margin:0 auto;padding:24px 16px;background:#f9f7f4;color:#222;line-height:1.5}
+  h1{font-size:2em;border-bottom:3px solid #8b6a3e;padding-bottom:.3em;color:#4a3520;margin-bottom:.3em}
+  h2{font-size:1.3em;color:#6b4c2a;margin:2em 0 .4em;border-bottom:1px solid #d4c4a8;padding-bottom:.2em}
+  h3{font-size:1.1em;color:#4a3520;margin:0 0 6px}
+  .subtitle{color:#888;font-size:.9em;margin-bottom:2em}
+  #toc{background:#fff8f0;border:1px solid #d4c4a8;border-radius:4px;padding:16px;margin-bottom:2em}
+  #toc h2{margin:0 0 .5em;border:none}
+  #toc table{border-collapse:collapse;width:100%}
+  #toc th{background:#8b6a3e;color:#fff;text-align:left;padding:5px 10px;font-size:.85em}
+  #toc td{padding:4px 10px;font-size:.87em;border-bottom:1px solid #ede4d4}
+  #toc tr:hover td{background:#fff3e0}
+  .person-card{background:#fff;border:1px solid #d4c4a8;border-radius:6px;padding:18px 20px;margin:18px 0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .person-id{font-family:monospace;font-size:.72em;color:#bbb;margin-left:8px}
+  .life-dates{color:#777;font-size:.9em;margin-bottom:8px}
+  .sex-male{color:#2a5a8c}.sex-female{color:#8c2a5a}.sex-unknown{color:#777}
+  table.events{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:.87em}
+  table.events th{background:#f0e8d8;text-align:left;padding:4px 8px;color:#5a3a10}
+  table.events td{padding:4px 8px;border-bottom:1px solid #ede4d4;vertical-align:top}
+  .rel-section{margin:8px 0 0;font-size:.88em}
+  .rel-section strong{color:#6b4c2a}
+  .rel-item{display:inline-block;margin:2px 4px 2px 0}
+  a{color:#8b4513;text-decoration:none}
+  a:hover{text-decoration:underline;color:#c06a20}
+  .badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:.75em;font-family:monospace;background:#ede4d4;color:#6b4c2a;border:1px solid #d4c4a8}
+  .notes{font-style:italic;color:#888;font-size:.85em;margin-top:6px}
+  .no-events{color:#bbb;font-size:.85em;font-style:italic}
+  footer{margin-top:3em;padding-top:1em;border-top:1px solid #d4c4a8;font-size:.8em;color:#aaa;text-align:center}
+"#;
+
+/// Export all data as a self-contained single-file HTML document.
+pub fn html_export(db: &Database) -> KinforgeResult<String> {
+    use kinforge_core::models::{EventType, Sex};
+    use chrono::Local;
+
+    let people = db.list_people()?;
+    let today = Local::now().format("%d %B %Y").to_string();
+
+    let mut out = String::with_capacity(65536);
+
+    // ── Head ──────────────────────────────────────────────────────────────
+    out.push_str(&format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Kinforge Family History</title>
+<style>{}</style>
+</head>
+<body>
+<h1>Family History Report</h1>
+<p class="subtitle">Generated by Kinforge &bull; {} &bull; {} people</p>
+"#,
+        HTML_CSS,
+        html_escape(&today),
+        people.len()
+    ));
+
+    // ── Index table ───────────────────────────────────────────────────────
+    out.push_str(r#"<div id="toc"><h2>Index of People</h2>
+<table>
+<tr><th>Name</th><th>Sex</th><th>Born</th><th>Died</th></tr>
+"#);
+
+    for p in &people {
+        let name = p.display_name();
+        let anchor = format!("p-{}", p.id.as_str().replace('-', ""));
+        let sex_class = match p.sex {
+            Sex::Male => "sex-male",
+            Sex::Female => "sex-female",
+            Sex::Unknown => "sex-unknown",
+        };
+        let sex_label = match p.sex {
+            Sex::Male => "M",
+            Sex::Female => "F",
+            Sex::Unknown => "?",
+        };
+        let events = db.list_events_for_person(&p.id).unwrap_or_default();
+        let birth_yr = events
+            .iter()
+            .find(|e| e.event_type == EventType::Birth)
+            .and_then(|e| e.date.as_ref())
+            .and_then(|d| year_from_date(d))
+            .unwrap_or_default();
+        let death_yr = events
+            .iter()
+            .find(|e| e.event_type == EventType::Death)
+            .and_then(|e| e.date.as_ref())
+            .and_then(|d| year_from_date(d))
+            .unwrap_or_default();
+
+        out.push_str(&format!(
+            "<tr><td><a href=\"#{anchor}\">{name}</a></td>\
+             <td class=\"{sex_class}\">{sex_label}</td>\
+             <td>{birth_yr}</td><td>{death_yr}</td></tr>\n",
+            anchor = anchor,
+            name = html_escape(&name),
+            sex_class = sex_class,
+            sex_label = sex_label,
+            birth_yr = html_escape(&birth_yr),
+            death_yr = html_escape(&death_yr),
+        ));
+    }
+    out.push_str("</table></div>\n");
+
+    // ── Per-person cards ──────────────────────────────────────────────────
+    out.push_str("<h2>People</h2>\n");
+
+    for p in &people {
+        let name = p.display_name();
+        let anchor = format!("p-{}", p.id.as_str().replace('-', ""));
+        let events = db.list_events_for_person(&p.id).unwrap_or_default();
+        let relationships = db.list_relationships_for_person(&p.id).unwrap_or_default();
+
+        let birth_yr = events.iter().find(|e| e.event_type == EventType::Birth)
+            .and_then(|e| e.date.as_ref()).and_then(|d| year_from_date(d));
+        let death_yr = events.iter().find(|e| e.event_type == EventType::Death)
+            .and_then(|e| e.date.as_ref()).and_then(|d| year_from_date(d));
+
+        let life_dates = match (birth_yr, death_yr) {
+            (Some(b), Some(d)) => format!("{} – {}", b, d),
+            (Some(b), None) => format!("b. {}", b),
+            (None, Some(d)) => format!("d. {}", d),
+            (None, None) => String::new(),
+        };
+
+        let sex_class = match p.sex {
+            Sex::Male => "sex-male",
+            Sex::Female => "sex-female",
+            Sex::Unknown => "sex-unknown",
+        };
+
+        out.push_str(&format!(
+            "<div class=\"person-card\" id=\"{anchor}\">\
+             <h3><span class=\"{sex_class}\">{name}</span>\
+             <span class=\"person-id\">{short_id}</span></h3>\n",
+            anchor = anchor,
+            sex_class = sex_class,
+            name = html_escape(&name),
+            short_id = &p.id.as_str()[..8],
+        ));
+
+        if !life_dates.is_empty() {
+            out.push_str(&format!(
+                "<div class=\"life-dates\">{}</div>\n",
+                html_escape(&life_dates)
+            ));
+        }
+
+        // Events table
+        if events.is_empty() {
+            out.push_str("<p class=\"no-events\">No events recorded.</p>\n");
+        } else {
+            out.push_str("<table class=\"events\"><tr><th>Event</th><th>Date</th><th>Place</th><th>Notes</th></tr>\n");
+            for e in &events {
+                let date_str = e.date.as_ref()
+                    .map(|d| {
+                        use kinforge_core::models::EventDate;
+                        match d {
+                            EventDate::Exact(nd) => nd.format("%d %b %Y").to_string(),
+                            EventDate::Approximate(nd) => format!("c. {}", nd.format("%Y")),
+                            EventDate::Before(nd) => format!("bef. {}", nd.format("%Y")),
+                            EventDate::After(nd) => format!("aft. {}", nd.format("%Y")),
+                            EventDate::Between(n1, n2) => format!("{}/{}",n1.format("%Y"),n2.format("%Y")),
+                            EventDate::Unknown => String::new(),
+                        }
+                    })
+                    .unwrap_or_default();
+                let place_str = e.place_id.as_ref()
+                    .and_then(|pid| db.get_place(pid).ok())
+                    .map(|pl| pl.name.clone())
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "<tr><td>{etype}</td><td>{date}</td><td>{place}</td><td>{notes}</td></tr>\n",
+                    etype = html_escape(&e.event_type.to_string()),
+                    date = html_escape(&date_str),
+                    place = html_escape(&place_str),
+                    notes = html_escape(e.notes.as_deref().unwrap_or("")),
+                ));
+            }
+            out.push_str("</table>\n");
+        }
+
+        // Relationships
+        if !relationships.is_empty() {
+            out.push_str("<div class=\"rel-section\"><strong>Relationships:</strong> ");
+            for rel in &relationships {
+                let other_id = if rel.person1_id == p.id { &rel.person2_id } else { &rel.person1_id };
+                let other_anchor = format!("p-{}", other_id.as_str().replace('-', ""));
+                let other_name = db.get_person(other_id)
+                    .map(|op| op.display_name())
+                    .unwrap_or_else(|_| other_id.to_string());
+                let rel_label = rel.rel_type.to_string();
+                out.push_str(&format!(
+                    "<span class=\"rel-item\"><span class=\"badge\">{rel}</span> \
+                     <a href=\"#{anchor}\">{name}</a></span>",
+                    rel = html_escape(&rel_label),
+                    anchor = other_anchor,
+                    name = html_escape(&other_name),
+                ));
+            }
+            out.push_str("</div>\n");
+        }
+
+        // Person notes
+        if let Some(ref notes) = p.notes {
+            out.push_str(&format!(
+                "<div class=\"notes\">{}</div>\n",
+                html_escape(notes)
+            ));
+        }
+
+        out.push_str("</div>\n");
+    }
+
+    // ── Footer ────────────────────────────────────────────────────────────
+    out.push_str(&format!(
+        "<footer>Kinforge Family History &bull; {} people &bull; Generated {}</footer>\n\
+         </body>\n</html>\n",
+        people.len(),
+        html_escape(&today)
+    ));
+
+    Ok(out)
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
 }

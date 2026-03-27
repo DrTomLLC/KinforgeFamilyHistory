@@ -1,7 +1,7 @@
 use chrono::Local;
 use kinforge_config::Config;
 use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
-use kinforge_storage::{repository::DatabaseStats, Database};
+use kinforge_storage::{repository::DatabaseStats, Database, FtsResult};
 use std::path::Path;
 
 /// A single issue found during an integrity check.
@@ -26,9 +26,28 @@ pub struct NotesMatch {
     pub notes: String,
 }
 
+/// Metadata about a single backup file.
+#[derive(Debug, Clone)]
+pub struct BackupInfo {
+    pub path: std::path::PathBuf,
+    pub size_bytes: u64,
+    /// Timestamp string extracted from the filename (e.g. "2026-03-27_14-00-00")
+    pub timestamp: String,
+}
+
 pub struct Application {
-    pub db: Database,
+    db: Database,
     pub config: Config,
+}
+
+impl Application {
+    /// Read-only access to the underlying database.
+    ///
+    /// Prefer using Application methods directly. This accessor exists for
+    /// report and import/export functions that operate at the storage layer.
+    pub fn database(&self) -> &Database {
+        &self.db
+    }
 }
 
 impl Application {
@@ -504,6 +523,48 @@ impl Application {
             }
         }
 
+        // Duplicate people: two people with the same given + surname (case-insensitive)
+        {
+            use std::collections::HashMap;
+            let all = self.db.list_people()?;
+            // Map normalised "given|surname" -> list of person IDs
+            let mut name_map: HashMap<String, Vec<String>> = HashMap::new();
+            for person in &all {
+                if let Some(name) = person.names.first() {
+                    let given = name
+                        .given
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let surname = name
+                        .surname
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if !given.is_empty() || !surname.is_empty() {
+                        let key = format!("{}|{}", given, surname);
+                        name_map.entry(key).or_default().push(person.id.to_string());
+                    }
+                }
+            }
+            for (key, ids) in &name_map {
+                if ids.len() > 1 {
+                    let parts: Vec<&str> = key.splitn(2, '|').collect();
+                    let display = format!("{} {}", parts[0], parts[1]).trim().to_string();
+                    issues.push(IntegrityIssue {
+                        severity: "warning",
+                        entity_type: "Person".to_string(),
+                        id: ids[0].clone(),
+                        message: format!(
+                            "possible duplicate: {} people share the name '{}' — consider `person merge`",
+                            ids.len(),
+                            display
+                        ),
+                    });
+                }
+            }
+        }
+
         Ok(issues)
     }
 
@@ -587,6 +648,22 @@ impl Application {
 
     pub fn list_places(&self) -> KinforgeResult<Vec<Place>> {
         self.db.list_places()
+    }
+
+    /// Find a place by exact name (case-insensitive) or create it if absent.
+    pub fn find_or_create_place(&self, name: &str) -> KinforgeResult<PlaceId> {
+        let lower = name.to_lowercase();
+        if let Some(existing) = self
+            .db
+            .list_places()?
+            .into_iter()
+            .find(|p| p.name.to_lowercase() == lower)
+        {
+            return Ok(existing.id);
+        }
+        let place = Place::new(name);
+        self.db.insert_place(&place)?;
+        Ok(place.id)
     }
 
     // ── Relationships ──────────────────────────────────────────────────────
@@ -711,6 +788,354 @@ impl Application {
     pub fn list_all_citations(&self) -> KinforgeResult<Vec<Citation>> {
         self.db.list_all_citations()
     }
+
+    // ── Media ────────────────────────────────────────────────────────────────
+
+    pub fn add_media(
+        &self,
+        title: &str,
+        media_type: MediaType,
+        path: Option<&str>,
+        url: Option<&str>,
+        description: Option<&str>,
+        date: Option<&str>,
+    ) -> KinforgeResult<Media> {
+        let mut m = Media::new(title, media_type);
+        m.path = path.map(|s| s.to_string());
+        m.url = url.map(|s| s.to_string());
+        m.description = description.map(|s| s.to_string());
+        m.date = date.map(|s| s.to_string());
+        self.db.insert_media(&m)?;
+        Ok(m)
+    }
+
+    pub fn update_media(&self, media: Media) -> KinforgeResult<Media> {
+        self.db.update_media(&media)?;
+        Ok(media)
+    }
+
+    pub fn delete_media(&self, id: &MediaId) -> KinforgeResult<()> {
+        self.db.delete_media(id)
+    }
+
+    pub fn get_media(&self, id: &MediaId) -> KinforgeResult<Media> {
+        self.db.get_media(id)
+    }
+
+    pub fn list_media(&self) -> KinforgeResult<Vec<Media>> {
+        self.db.list_media()
+    }
+
+    /// Attach a media record to a person, event, or source.
+    pub fn attach_media(
+        &self,
+        media_id: &MediaId,
+        entity_type: MediaEntityType,
+        entity_id: &str,
+    ) -> KinforgeResult<MediaLink> {
+        // Verify media exists
+        self.db.get_media(media_id)?;
+        let link = MediaLink::new(media_id.clone(), entity_type, entity_id);
+        self.db.insert_media_link(&link)?;
+        Ok(link)
+    }
+
+    pub fn detach_media(&self, link_id: &MediaLinkId) -> KinforgeResult<()> {
+        self.db.delete_media_link(link_id)
+    }
+
+    pub fn list_media_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Media>> {
+        self.db
+            .list_media_for_entity(&MediaEntityType::Person, &person_id.as_str())
+    }
+
+    pub fn list_media_for_event(&self, event_id: &EventId) -> KinforgeResult<Vec<Media>> {
+        self.db
+            .list_media_for_entity(&MediaEntityType::Event, &event_id.as_str())
+    }
+
+    pub fn list_media_links_for_media(
+        &self,
+        media_id: &MediaId,
+    ) -> KinforgeResult<Vec<MediaLink>> {
+        self.db.list_media_links_for_media(media_id)
+    }
+
+    /// Resolve a media ID from a full UUID or unambiguous prefix.
+    pub fn resolve_media_id(&self, input: &str) -> KinforgeResult<MediaId> {
+        if let Ok(id) = MediaId::from_str(input) {
+            return Ok(id);
+        }
+        let all = self.db.list_media()?;
+        let matches: Vec<_> = all
+            .iter()
+            .filter(|m| m.id.as_str().starts_with(input))
+            .collect();
+        match matches.len() {
+            1 => Ok(matches[0].id.clone()),
+            0 => Err(KinforgeError::NotFound {
+                entity_type: "Media".to_string(),
+                id: input.to_string(),
+            }),
+            _ => Err(KinforgeError::InvalidField {
+                field: "media_id".to_string(),
+                value: format!("prefix '{}' is ambiguous ({} matches)", input, matches.len()),
+            }),
+        }
+    }
+
+    // ── Full-text search ──────────────────────────────────────────────────────
+
+    /// Search all text content (names, notes, source titles, place names) using FTS5.
+    /// Results are sorted by relevance (best match first).
+    pub fn search_fulltext(&self, query: &str) -> KinforgeResult<Vec<FtsResult>> {
+        self.db.search_fulltext(query)
+    }
+
+    // ── Relationship path finding ─────────────────────────────────────────────
+
+    /// BFS through the relationship graph to find the shortest path between two people.
+    /// Returns `None` if no connection exists.
+    pub fn find_relationship_path(
+        &self,
+        from_id: &PersonId,
+        to_id: &PersonId,
+    ) -> KinforgeResult<Option<RelationshipPath>> {
+        use std::collections::{HashMap, VecDeque};
+
+        if from_id == to_id {
+            let person = self.db.get_person(from_id)?;
+            return Ok(Some(RelationshipPath {
+                steps: vec![RelationshipStep {
+                    person,
+                    via_rel_type: None,
+                    direction: None,
+                }],
+            }));
+        }
+
+        // BFS state: entity_id_str -> (parent_id_str, rel_type, person1_was_current)
+        let mut parent: HashMap<String, (String, RelationshipType, bool)> = HashMap::new();
+        let mut queue: VecDeque<PersonId> = VecDeque::new();
+
+        parent.insert(from_id.as_str(), ("".to_string(), RelationshipType::Sibling, false));
+        queue.push_back(from_id.clone());
+        let mut found = false;
+
+        'bfs: while let Some(current) = queue.pop_front() {
+            let rels = self.db.list_relationships_for_person(&current)?;
+            for rel in rels {
+                let neighbor = if rel.person1_id == current {
+                    rel.person2_id.clone()
+                } else {
+                    rel.person1_id.clone()
+                };
+                let nkey = neighbor.as_str();
+                if parent.contains_key(&nkey) {
+                    continue;
+                }
+                parent.insert(
+                    nkey.clone(),
+                    (current.as_str(), rel.rel_type.clone(), rel.person1_id == current),
+                );
+                if neighbor == *to_id {
+                    found = true;
+                    break 'bfs;
+                }
+                queue.push_back(neighbor);
+            }
+        }
+
+        if !found {
+            return Ok(None);
+        }
+
+        // Reconstruct path: walk backwards from to_id to from_id
+        let mut path_ids: Vec<(String, Option<RelationshipType>, Option<bool>)> = Vec::new();
+        let mut current_key = to_id.as_str();
+        loop {
+            let (prev_key, rel_type, p1_was_prev) = parent.get(&current_key).unwrap();
+            if prev_key.is_empty() {
+                path_ids.push((current_key.clone(), None, None));
+                break;
+            }
+            path_ids.push((
+                current_key.clone(),
+                Some(rel_type.clone()),
+                Some(*p1_was_prev),
+            ));
+            current_key = prev_key.clone();
+        }
+        path_ids.reverse();
+
+        // Build RelationshipStep list
+        let mut steps: Vec<RelationshipStep> = Vec::new();
+        for (id_str, via_rel, p1_was_prev) in path_ids {
+            let pid = PersonId::from_str(&id_str)
+                .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+            let person = self.db.get_person(&pid)?;
+            let direction = p1_was_prev.map(|was_p1| {
+                if was_p1 {
+                    RelationshipDirection::Person1ToPerson2
+                } else {
+                    RelationshipDirection::Person2ToPerson1
+                }
+            });
+            steps.push(RelationshipStep {
+                person,
+                via_rel_type: via_rel,
+                direction,
+            });
+        }
+
+        Ok(Some(RelationshipPath { steps }))
+    }
+}
+
+/// One step in a relationship path between two people.
+#[derive(Debug, Clone)]
+pub struct RelationshipStep {
+    pub person: Person,
+    /// The relationship that connected the previous step to this person (None for the start node)
+    pub via_rel_type: Option<RelationshipType>,
+    /// Whether the previous person was `person1` (→ person2) or `person2` (← person1)
+    pub direction: Option<RelationshipDirection>,
+}
+
+/// Direction of a relationship in a path step.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RelationshipDirection {
+    Person1ToPerson2,
+    Person2ToPerson1,
+}
+
+/// The complete path between two people through the relationship graph.
+#[derive(Debug, Clone)]
+pub struct RelationshipPath {
+    pub steps: Vec<RelationshipStep>,
+}
+
+impl RelationshipPath {
+    /// Describe each hop in human-readable form.
+    pub fn describe(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for (i, step) in self.steps.iter().enumerate() {
+            if i == 0 {
+                lines.push(step.person.display_name());
+            } else {
+                let rel_desc = if let (Some(ref rt), Some(ref dir)) =
+                    (&step.via_rel_type, &step.direction)
+                {
+                    describe_path_rel(rt, dir)
+                } else {
+                    "related to".to_string()
+                };
+                lines.push(format!("  └─ {} → {}", rel_desc, step.person.display_name()));
+            }
+        }
+        lines
+    }
+}
+
+fn describe_path_rel(rt: &RelationshipType, dir: &RelationshipDirection) -> String {
+    use RelationshipDirection::*;
+    match rt {
+        RelationshipType::ParentChild => match dir {
+            Person1ToPerson2 => "parent of".to_string(),
+            Person2ToPerson1 => "child of".to_string(),
+        },
+        RelationshipType::AdoptiveParent => match dir {
+            Person1ToPerson2 => "adoptive parent of".to_string(),
+            Person2ToPerson1 => "adoptive child of".to_string(),
+        },
+        RelationshipType::StepParent => match dir {
+            Person1ToPerson2 => "step-parent of".to_string(),
+            Person2ToPerson1 => "step-child of".to_string(),
+        },
+        RelationshipType::Godparent => match dir {
+            Person1ToPerson2 => "godparent of".to_string(),
+            Person2ToPerson1 => "godchild of".to_string(),
+        },
+        RelationshipType::Foster => match dir {
+            Person1ToPerson2 => "foster parent of".to_string(),
+            Person2ToPerson1 => "foster child of".to_string(),
+        },
+        RelationshipType::Spouse => "spouse of".to_string(),
+        RelationshipType::Sibling => "sibling of".to_string(),
+        RelationshipType::HalfSibling => "half-sibling of".to_string(),
+    }
+}
+
+// ── Research Tasks ────────────────────────────────────────────────────────────
+
+impl Application {
+    pub fn add_task(
+        &self,
+        description: &str,
+        person_id: Option<PersonId>,
+        priority: TaskPriority,
+        notes: Option<&str>,
+    ) -> KinforgeResult<Task> {
+        let mut t = Task::new(description);
+        t.person_id = person_id;
+        t.priority = priority;
+        t.notes = notes.map(|s| s.to_string());
+        self.db.insert_task(&t)?;
+        Ok(t)
+    }
+
+    pub fn get_task(&self, id: &TaskId) -> KinforgeResult<Task> {
+        self.db.get_task(id)
+    }
+
+    pub fn update_task(&self, task: Task) -> KinforgeResult<Task> {
+        self.db.update_task(&task)?;
+        Ok(task)
+    }
+
+    pub fn delete_task(&self, id: &TaskId) -> KinforgeResult<()> {
+        self.db.delete_task(id)
+    }
+
+    pub fn list_tasks(&self) -> KinforgeResult<Vec<Task>> {
+        self.db.list_tasks()
+    }
+
+    pub fn list_tasks_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Task>> {
+        self.db.list_tasks_for_person(person_id)
+    }
+
+    /// Mark a task as Done and touch its updated timestamp.
+    pub fn complete_task(&self, id: &TaskId) -> KinforgeResult<Task> {
+        let mut t = self.db.get_task(id)?;
+        t.status = TaskStatus::Done;
+        t.touch();
+        self.db.update_task(&t)?;
+        Ok(t)
+    }
+
+    /// Resolve a task ID from a full UUID or unambiguous short prefix.
+    pub fn resolve_task_id(&self, input: &str) -> KinforgeResult<TaskId> {
+        if let Ok(id) = TaskId::from_str(input) {
+            return Ok(id);
+        }
+        let all = self.db.list_tasks()?;
+        let matches: Vec<_> = all
+            .iter()
+            .filter(|t| t.id.as_str().starts_with(input))
+            .collect();
+        match matches.len() {
+            1 => Ok(matches[0].id.clone()),
+            0 => Err(KinforgeError::NotFound {
+                entity_type: "Task".to_string(),
+                id: input.to_string(),
+            }),
+            _ => Err(KinforgeError::InvalidField {
+                field: "task_id".to_string(),
+                value: format!("prefix '{}' is ambiguous ({} matches)", input, matches.len()),
+            }),
+        }
+    }
 }
 
 // ── Backup ────────────────────────────────────────────────────────────────────
@@ -754,4 +1179,62 @@ fn prune_backups(dir: &Path, max: u32) -> KinforgeResult<()> {
         std::fs::remove_file(oldest.path())?;
     }
     Ok(())
+}
+
+fn backup_dir_for(config: &Config) -> std::path::PathBuf {
+    config
+        .database_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("backups")
+}
+
+fn scan_backup_dir(dir: &std::path::PathBuf) -> KinforgeResult<Vec<BackupInfo>> {
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut infos: Vec<BackupInfo> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "db").unwrap_or(false))
+        .filter_map(|e| {
+            let path = e.path();
+            let size_bytes = e.metadata().ok()?.len();
+            let stem = path.file_stem()?.to_str()?.to_string();
+            // filename: kinforge_2026-03-27_14-00-00.db  → timestamp is after first '_'
+            let timestamp = stem
+                .splitn(2, '_')
+                .nth(1)
+                .unwrap_or(&stem)
+                .to_string();
+            Some(BackupInfo { path, size_bytes, timestamp })
+        })
+        .collect();
+
+    // Newest first
+    infos.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(infos)
+}
+
+impl Application {
+    /// Create a manual backup right now, regardless of `backup_on_open` setting.
+    /// Returns the path to the new backup file.
+    pub fn backup_now(&self) -> KinforgeResult<std::path::PathBuf> {
+        create_backup(&self.config)?;
+        let dir = backup_dir_for(&self.config);
+        let infos = scan_backup_dir(&dir)?;
+        infos
+            .into_iter()
+            .next()
+            .map(|i| i.path)
+            .ok_or_else(|| KinforgeError::NotFound {
+                entity_type: "backup".to_string(),
+                id: "latest".to_string(),
+            })
+    }
+
+    /// List all backup files for the current database, newest first.
+    pub fn list_backups(&self) -> KinforgeResult<Vec<BackupInfo>> {
+        let dir = backup_dir_for(&self.config);
+        scan_backup_dir(&dir)
+    }
 }
