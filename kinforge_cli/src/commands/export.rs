@@ -20,8 +20,13 @@ pub enum ExportCommands {
         /// Output file path
         output: String,
     },
-    /// Export people list to CSV (id, name, sex, birth_year, death_year)
+    /// Export people list to CSV (id, given, surname, sex, birth_year, death_year)
     Csv {
+        /// Output file path
+        output: String,
+    },
+    /// Export all events to CSV (person_id, person_name, event_type, date, place)
+    EventsCsv {
         /// Output file path
         output: String,
     },
@@ -129,6 +134,58 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
                 "Exported CSV \u{2192}".green().bold(),
                 output.bold(),
                 format!("({} people)", people.len()).bright_black()
+            );
+        }
+
+        ExportCommands::EventsCsv { output } => {
+            let people = app.list_people()?;
+            let file = File::create(&output)?;
+            let mut writer = BufWriter::new(file);
+            writeln!(writer, "person_id,person_name,event_type,date,place")?;
+
+            let mut row_count = 0usize;
+            let escape = |s: &str| -> String {
+                if s.contains(',') || s.contains('"') || s.contains('\n') {
+                    format!("\"{}\"", s.replace('"', "\"\""))
+                } else {
+                    s.to_string()
+                }
+            };
+            let id_str = |id: &kinforge_core::models::PersonId| id.as_str();
+
+            for p in &people {
+                let name = p.display_name();
+                let events = app.list_events_for_person(&p.id).unwrap_or_default();
+                for ev in &events {
+                    let date_str = ev
+                        .date
+                        .as_ref()
+                        .map(|d| d.to_string())
+                        .unwrap_or_default();
+                    let place_str = ev
+                        .place_id
+                        .as_ref()
+                        .and_then(|pid| app.get_place(pid).ok())
+                        .map(|pl| pl.name)
+                        .unwrap_or_default();
+                    writeln!(
+                        writer,
+                        "{},{},{},{},{}",
+                        escape(&id_str(&p.id)),
+                        escape(&name),
+                        escape(&ev.event_type.to_string()),
+                        escape(&date_str),
+                        escape(&place_str)
+                    )?;
+                    row_count += 1;
+                }
+            }
+            writer.flush()?;
+            println!(
+                "{} {} {}",
+                "Exported events CSV \u{2192}".green().bold(),
+                output.bold(),
+                format!("({} events)", row_count).bright_black()
             );
         }
 

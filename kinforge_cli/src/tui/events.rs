@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use kinforge_core::models::{PersonId, SourceId, TaskId};
 
-use super::state::{InputMode, Tab, TaskRow, TuiState};
+use super::state::{first_task_item_idx, InputMode, Tab, TaskRow, TuiState};
 
 pub enum Action {
     None,
@@ -12,7 +12,8 @@ pub enum Action {
     CreateTask(String),
     CycleTaskPriority(TaskId),
     DeleteTask(TaskId),
-    CreatePerson(String, String), // (given, surname)
+    CreatePerson(String, String),  // (given, surname)
+    CreateSource(String, String),  // (title, author)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -31,6 +32,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::Search => handle_search(state, key),
         InputMode::TaskCreate => handle_task_create(state, key),
         InputMode::PersonCreate => handle_person_create(state, key),
+        InputMode::SourceCreate => handle_source_create(state, key),
     }
 }
 
@@ -109,6 +111,68 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Jump to top
+        KeyCode::Char('g') => {
+            match state.active_tab {
+                Tab::People if !state.detail_open => { state.people_selected = 0; }
+                Tab::Tasks => { state.tasks_selected = first_task_item_idx(&state.task_rows); }
+                Tab::Sources if !state.source_detail_open => { state.sources_selected = 0; }
+                _ => {}
+            }
+            Action::None
+        }
+
+        // Jump to bottom
+        KeyCode::Char('G') => {
+            match state.active_tab {
+                Tab::People if !state.detail_open => {
+                    state.people_selected = state.filtered_people.len().saturating_sub(1);
+                }
+                Tab::Tasks => {
+                    if let Some(idx) = state.task_rows.iter().rposition(|r| matches!(r, TaskRow::Item(_))) {
+                        state.tasks_selected = idx;
+                    }
+                }
+                Tab::Sources if !state.source_detail_open => {
+                    state.sources_selected = state.sources.len().saturating_sub(1);
+                }
+                _ => {}
+            }
+            Action::None
+        }
+
+        // Page up (10 items)
+        KeyCode::PageUp => {
+            match state.active_tab {
+                Tab::People if !state.detail_open => {
+                    state.people_selected = state.people_selected.saturating_sub(10);
+                }
+                Tab::Tasks => { for _ in 0..10 { move_task_up(state); } }
+                Tab::Sources if !state.source_detail_open => {
+                    state.sources_selected = state.sources_selected.saturating_sub(10);
+                }
+                _ => {}
+            }
+            Action::None
+        }
+
+        // Page down (10 items)
+        KeyCode::PageDown => {
+            match state.active_tab {
+                Tab::People if !state.detail_open => {
+                    let max = state.filtered_people.len().saturating_sub(1);
+                    state.people_selected = (state.people_selected + 10).min(max);
+                }
+                Tab::Tasks => { for _ in 0..10 { move_task_down(state); } }
+                Tab::Sources if !state.source_detail_open => {
+                    let max = state.sources.len().saturating_sub(1);
+                    state.sources_selected = (state.sources_selected + 10).min(max);
+                }
+                _ => {}
+            }
+            Action::None
+        }
+
         KeyCode::Enter => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
@@ -135,6 +199,15 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             }
             _ => Action::None,
         },
+
+        // New source: press 'n' in Sources tab (when no detail open)
+        KeyCode::Char('n') if state.active_tab == Tab::Sources && !state.source_detail_open => {
+            state.source_create_title.clear();
+            state.source_create_author.clear();
+            state.source_create_field = 0;
+            state.mode = InputMode::SourceCreate;
+            Action::None
+        }
 
         // New person: press 'n' in People tab (when no detail/search open)
         KeyCode::Char('n') if state.active_tab == Tab::People && !state.detail_open && !state.search_active => {
@@ -286,6 +359,41 @@ fn handle_person_create(state: &mut TuiState, key: KeyEvent) -> Action {
                 state.person_create_given.push(c);
             } else {
                 state.person_create_surname.push(c);
+            }
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_source_create(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            state.source_create_field = 1 - state.source_create_field;
+        }
+        KeyCode::Enter => {
+            let title = state.source_create_title.trim().to_string();
+            let author = state.source_create_author.trim().to_string();
+            state.mode = InputMode::Normal;
+            if !title.is_empty() {
+                return Action::CreateSource(title, author);
+            }
+        }
+        KeyCode::Backspace => {
+            if state.source_create_field == 0 {
+                state.source_create_title.pop();
+            } else {
+                state.source_create_author.pop();
+            }
+        }
+        KeyCode::Char(c) => {
+            if state.source_create_field == 0 {
+                state.source_create_title.push(c);
+            } else {
+                state.source_create_author.push(c);
             }
         }
         _ => {}

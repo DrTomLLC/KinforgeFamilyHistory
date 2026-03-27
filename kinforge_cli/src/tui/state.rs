@@ -47,6 +47,7 @@ pub enum InputMode {
     Search,
     TaskCreate,
     PersonCreate,
+    SourceCreate,
 }
 
 // ── Row types ─────────────────────────────────────────────────────────────────
@@ -124,6 +125,11 @@ pub struct TuiState {
     pub person_create_given: String,
     pub person_create_surname: String,
     pub person_create_field: u8, // 0 = given, 1 = surname
+
+    // Inline source creation
+    pub source_create_title: String,
+    pub source_create_author: String,
+    pub source_create_field: u8, // 0 = title, 1 = author
 }
 
 impl TuiState {
@@ -199,6 +205,9 @@ impl TuiState {
             person_create_given: String::new(),
             person_create_surname: String::new(),
             person_create_field: 0,
+            source_create_title: String::new(),
+            source_create_author: String::new(),
+            source_create_field: 0,
         })
     }
 
@@ -269,6 +278,14 @@ impl TuiState {
         // Select the last person (just added)
         if !self.filtered_people.is_empty() {
             self.people_selected = self.filtered_people.len() - 1;
+        }
+    }
+
+    /// Reload the sources list from the DB and select the last entry.
+    pub fn reload_sources(&mut self, app: &Application) {
+        self.sources = load_sources(app);
+        if !self.sources.is_empty() {
+            self.sources_selected = self.sources.len() - 1;
         }
     }
 }

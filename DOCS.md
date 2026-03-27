@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-03-27
 > **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.0.0
+> **Version:** 1.1.0
 
 ---
 
@@ -439,6 +439,7 @@ kinforge search fulltext <QUERY>
 kinforge export gedcom <OUTPUT>
 kinforge export json <OUTPUT>
 kinforge export csv <OUTPUT>
+kinforge export events-csv <OUTPUT>
 kinforge export html <OUTPUT>
 kinforge export geojson <OUTPUT>
 ```
@@ -515,8 +516,12 @@ Opens an interactive terminal UI with four tabs:
 | `Enter` | People, Sources | Open detail panel; close if already open |
 | `d` / `c` | Tasks | Mark selected task as Done |
 | `n` | Tasks | Open inline input to create a new task |
+| `n` | Sources | Open inline popup to create a new source (Title + Author) |
 | `p` | Tasks | Cycle selected task's priority (Low → Medium → High → Low) |
 | `x` | Tasks | Delete selected task |
+| `g` | People, Tasks, Sources | Jump to top of list |
+| `G` | People, Tasks, Sources | Jump to bottom of list |
+| `PageUp` / `PageDown` | People, Tasks, Sources | Scroll 10 items at a time |
 | `q` or `Ctrl+C` | Any | Quit |
 
 ---
@@ -596,6 +601,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] `kinforge backup list/create` — manual backup management CLI
 - [x] TUI Stats tab: research task breakdown with progress bar
 - [x] `BackupInfo` API + `Application::backup_now()` / `list_backups()`
+
+**v1.1.0:**
+- [x] TUI: `g`/`G` jump to top/bottom in all list tabs
+- [x] TUI: `PageUp`/`PageDown` scroll 10 items at a time
+- [x] TUI: `n` in Sources tab creates a new source (title + author popup)
+- [x] `kinforge export events-csv` — all events as CSV (person, type, date, place)
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

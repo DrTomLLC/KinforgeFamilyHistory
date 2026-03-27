@@ -96,6 +96,12 @@ fn run(
                         state.reload_people(app);
                     }
 
+                    events::Action::CreateSource(title, author) => {
+                        let a = if author.is_empty() { None } else { Some(author.as_str()) };
+                        let _ = app.add_source(&title, a, None, None, None, None);
+                        state.reload_sources(app);
+                    }
+
                     events::Action::None => {}
                 }
             }
