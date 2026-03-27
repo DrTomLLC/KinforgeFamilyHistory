@@ -30,6 +30,11 @@ pub enum ExportCommands {
         /// Output file path
         output: String,
     },
+    /// Export all sources to CSV (id, title, author, year, citation_count)
+    SourcesCsv {
+        /// Output file path
+        output: String,
+    },
     /// Export all people as a self-contained single-file HTML document
     Html {
         /// Output file path (e.g. family.html)
@@ -186,6 +191,40 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
                 "Exported events CSV \u{2192}".green().bold(),
                 output.bold(),
                 format!("({} events)", row_count).bright_black()
+            );
+        }
+
+        ExportCommands::SourcesCsv { output } => {
+            let sources = app.list_sources()?;
+            let file = File::create(&output)?;
+            let mut writer = BufWriter::new(file);
+            writeln!(writer, "id,title,author,year,citation_count")?;
+            let escape = |s: &str| -> String {
+                if s.contains(',') || s.contains('"') || s.contains('\n') {
+                    format!("\"{}\"", s.replace('"', "\"\""))
+                } else {
+                    s.to_string()
+                }
+            };
+            for s in &sources {
+                let citation_count = app.list_citations_for_source(&s.id)
+                    .map(|v| v.len()).unwrap_or(0);
+                writeln!(
+                    writer,
+                    "{},{},{},{},{}",
+                    escape(&s.id.as_str()),
+                    escape(&s.title),
+                    escape(s.author.as_deref().unwrap_or("")),
+                    s.year.map(|y| y.to_string()).unwrap_or_default(),
+                    citation_count
+                )?;
+            }
+            writer.flush()?;
+            println!(
+                "{} {} {}",
+                "Exported sources CSV \u{2192}".green().bold(),
+                output.bold(),
+                format!("({} sources)", sources.len()).bright_black()
             );
         }
 

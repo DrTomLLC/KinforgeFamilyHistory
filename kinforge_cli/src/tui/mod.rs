@@ -49,6 +49,10 @@ fn run(
                             app.list_events_for_person(&pid).unwrap_or_default();
                         state.detail_rel_rows =
                             build_person_rel_rows(app, &pid, &state.people);
+                        state.detail_notes = app.get_person(&pid).ok()
+                            .and_then(|p| p.notes.filter(|n| !n.is_empty()));
+                        state.detail_media_count =
+                            app.list_media_for_person(&pid).map(|v| v.len()).unwrap_or(0);
                         state.detail_person_id = Some(pid);
                         state.detail_open = true;
                         state.detail_scroll = 0;
@@ -93,6 +97,23 @@ fn run(
                         let g = if given.is_empty() { None } else { Some(given.as_str()) };
                         let s = if surname.is_empty() { None } else { Some(surname.as_str()) };
                         let _ = app.add_person(g, s, kinforge_core::models::Sex::Unknown, None);
+                        state.reload_people(app);
+                    }
+
+                    events::Action::EditPerson(pid, given, surname) => {
+                        let g = if given.is_empty() { None } else { Some(Some(given.clone())) };
+                        let s = if surname.is_empty() { None } else { Some(Some(surname.clone())) };
+                        if let Ok(p) = app.get_person(&pid) {
+                            if p.names.is_empty() {
+                                // No names yet — add one
+                                let gv = if given.is_empty() { None } else { Some(given.as_str()) };
+                                let sv = if surname.is_empty() { None } else { Some(surname.as_str()) };
+                                let _ = app.add_name_to_person(&pid, gv, sv, kinforge_core::models::NameType::Birth);
+                            } else {
+                                // Edit primary (index 0)
+                                let _ = app.update_name_on_person(&pid, 0, g, s, None);
+                            }
+                        }
                         state.reload_people(app);
                     }
 

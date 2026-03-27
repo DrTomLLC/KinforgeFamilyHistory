@@ -12,7 +12,8 @@ pub enum Action {
     CreateTask(String),
     CycleTaskPriority(TaskId),
     DeleteTask(TaskId),
-    CreatePerson(String, String),  // (given, surname)
+    CreatePerson(String, String),   // (given, surname)
+    EditPerson(PersonId, String, String), // (id, given, surname)
     CreateSource(String, String),  // (title, author)
     DeletePerson(PersonId),
 }
@@ -33,6 +34,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::Search => handle_search(state, key),
         InputMode::TaskCreate => handle_task_create(state, key),
         InputMode::PersonCreate => handle_person_create(state, key),
+        InputMode::PersonEdit => handle_person_edit(state, key),
         InputMode::SourceCreate => handle_source_create(state, key),
         InputMode::ConfirmDelete => handle_confirm_delete(state, key),
     }
@@ -220,6 +222,40 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Edit person primary name: press 'e' in People tab
+        KeyCode::Char('e') if state.active_tab == Tab::People => {
+            let info = if state.detail_open {
+                state.detail_person_id.as_ref().and_then(|pid| {
+                    state.people.iter().find(|p| &p.id == pid)
+                        .map(|p| (p.id.clone(), p.display_name.clone()))
+                })
+            } else {
+                state.selected_person().map(|r| (r.id.clone(), r.display_name.clone()))
+            };
+            if let Some((pid, _)) = info {
+                // Prefill from the PersonRow display_name — parse "Given Surname" split
+                let row = state.people.iter().find(|p| p.id == pid).cloned();
+                let (given, surname) = if let Some(r) = &row {
+                    // Try to get given/surname from app via the PersonRow — we use display_name as fallback
+                    // Split on last space: everything before = given, last word = surname
+                    let dn = r.display_name.trim();
+                    if let Some(pos) = dn.rfind(' ') {
+                        (dn[..pos].to_string(), dn[pos + 1..].to_string())
+                    } else {
+                        (String::new(), dn.to_string())
+                    }
+                } else {
+                    (String::new(), String::new())
+                };
+                state.person_edit_given = given;
+                state.person_edit_surname = surname;
+                state.person_edit_field = 0;
+                state.person_edit_id = Some(pid);
+                state.mode = InputMode::PersonEdit;
+            }
+            Action::None
+        }
+
         // Delete person: press 'x' in People tab (opens confirm popup)
         KeyCode::Char('x') if state.active_tab == Tab::People && !state.detail_open => {
             let info = state.selected_person().map(|r| (r.display_name.clone(), r.id.clone()));
@@ -379,6 +415,45 @@ fn handle_person_create(state: &mut TuiState, key: KeyEvent) -> Action {
                 state.person_create_given.push(c);
             } else {
                 state.person_create_surname.push(c);
+            }
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_person_edit(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.person_edit_id = None;
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            state.person_edit_field = 1 - state.person_edit_field;
+        }
+        KeyCode::Enter => {
+            let given = state.person_edit_given.trim().to_string();
+            let surname = state.person_edit_surname.trim().to_string();
+            if let Some(pid) = state.person_edit_id.take() {
+                state.mode = InputMode::Normal;
+                if !given.is_empty() || !surname.is_empty() {
+                    return Action::EditPerson(pid, given, surname);
+                }
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace => {
+            if state.person_edit_field == 0 {
+                state.person_edit_given.pop();
+            } else {
+                state.person_edit_surname.pop();
+            }
+        }
+        KeyCode::Char(c) => {
+            if state.person_edit_field == 0 {
+                state.person_edit_given.push(c);
+            } else {
+                state.person_edit_surname.push(c);
             }
         }
         _ => {}

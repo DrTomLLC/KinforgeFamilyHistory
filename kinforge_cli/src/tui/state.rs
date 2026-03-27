@@ -47,6 +47,7 @@ pub enum InputMode {
     Search,
     TaskCreate,
     PersonCreate,
+    PersonEdit,
     SourceCreate,
     ConfirmDelete,
 }
@@ -76,6 +77,7 @@ impl SortOrder {
 
 // ── Row types ─────────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct PersonRow {
     pub id: PersonId,
     pub display_name: String,
@@ -116,6 +118,8 @@ pub struct TuiState {
     pub detail_events: Vec<Event>,
     pub detail_rel_rows: Vec<(String, String)>, // (label, other name)
     pub detail_scroll: usize,
+    pub detail_notes: Option<String>,
+    pub detail_media_count: usize,
 
     // Tasks list
     pub tasks: Vec<Task>,
@@ -156,6 +160,12 @@ pub struct TuiState {
     pub person_create_given: String,
     pub person_create_surname: String,
     pub person_create_field: u8, // 0 = given, 1 = surname
+
+    // Inline person edit (edit primary name of selected person)
+    pub person_edit_given: String,
+    pub person_edit_surname: String,
+    pub person_edit_field: u8, // 0 = given, 1 = surname
+    pub person_edit_id: Option<PersonId>,
 
     // Inline source creation
     pub source_create_title: String,
@@ -217,6 +227,8 @@ impl TuiState {
             detail_events: vec![],
             detail_rel_rows: vec![],
             detail_scroll: 0,
+            detail_notes: None,
+            detail_media_count: 0,
             tasks,
             task_rows,
             tasks_selected: first_task,
@@ -239,6 +251,10 @@ impl TuiState {
             person_create_given: String::new(),
             person_create_surname: String::new(),
             person_create_field: 0,
+            person_edit_given: String::new(),
+            person_edit_surname: String::new(),
+            person_edit_field: 0,
+            person_edit_id: None,
             source_create_title: String::new(),
             source_create_author: String::new(),
             source_create_field: 0,
