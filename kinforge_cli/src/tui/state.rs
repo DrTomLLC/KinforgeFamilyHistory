@@ -157,9 +157,13 @@ pub struct TuiState {
     // People sort order
     pub sort_order: SortOrder,
 
-    // Delete confirmation
+    // Delete confirmation (person or source)
     pub confirm_name: String,
     pub confirm_person_id: Option<PersonId>,
+    pub confirm_source_id: Option<SourceId>,
+
+    // Top places by event count (for Stats tab)
+    pub top_places: Vec<(String, usize)>, // (place name, event count)
 
     // Inline task creation
     pub task_create_buf: String,
@@ -262,6 +266,8 @@ impl TuiState {
             sort_order: SortOrder::Name,
             confirm_name: String::new(),
             confirm_person_id: None,
+            confirm_source_id: None,
+            top_places: load_top_places(app),
             task_create_buf: String::new(),
             person_create_given: String::new(),
             person_create_surname: String::new(),
@@ -372,6 +378,11 @@ impl TuiState {
             self.sources_selected = self.sources.len() - 1;
         }
     }
+
+    /// Recompute top-places (called after events change).
+    pub fn reload_top_places(&mut self, app: &Application) {
+        self.top_places = load_top_places(app);
+    }
 }
 
 pub fn build_task_rows(tasks: &[Task]) -> Vec<TaskRow> {
@@ -422,6 +433,23 @@ pub fn first_task_item_idx(rows: &[TaskRow]) -> usize {
     rows.iter()
         .position(|r| matches!(r, TaskRow::Item(_)))
         .unwrap_or(0)
+}
+
+fn load_top_places(app: &Application) -> Vec<(String, usize)> {
+    use std::collections::HashMap;
+    let events = app.database().list_all_events().unwrap_or_default();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for e in &events {
+        if let Some(ref pid) = e.place_id {
+            if let Ok(place) = app.get_place(pid) {
+                *counts.entry(place.name).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut sorted: Vec<(String, usize)> = counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    sorted.truncate(5);
+    sorted
 }
 
 fn load_sources(app: &Application) -> Vec<SourceRow> {

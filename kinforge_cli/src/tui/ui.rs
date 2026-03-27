@@ -806,6 +806,27 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
         ]));
     }
 
+    // ── Top places ───────────────────────────────────────────────────────────
+    if !state.top_places.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "    Top Places",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        for (name, count) in &state.top_places {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("      {:<22}", truncate(name, 22)),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} event{}", count, if *count == 1 { "" } else { "s" }),
+                    Style::default().fg(Color::Yellow),
+                ),
+            ]));
+        }
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(
@@ -852,7 +873,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
                 if state.source_detail_open {
                     " ESC/Enter: close  ↑↓/jk: scroll  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next  ↑↓/jk: navigate  g/G: top/bottom  n: new source  Enter: citations  q: quit".to_string()
+                    " Tab: next  ↑↓/jk: navigate  g/G: top/bottom  n: new  x: delete  Enter: citations  q: quit".to_string()
                 }
             }
             Tab::Stats => " Tab: next tab  q: quit".to_string(),

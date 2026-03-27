@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-27
-> **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.3.0
+> **Build status:** 100 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.4.0
 
 ---
 
@@ -64,7 +64,7 @@ Key design principles:
 | CLI: report stats/people/individual/ancestors/descendants/tree | ✅ Complete | — |
 | CLI: search people (by name, sex filter) | ✅ Complete | — |
 | CLI: search sources (by title, year range) | ✅ Complete | — |
-| CLI: export gedcom/json/csv/html/geojson | ✅ Complete | — |
+| CLI: export gedcom/json/csv/events-csv/sources-csv/html/geojson/markdown | ✅ Complete | — |
 | CLI: import gedcom/json | ✅ Complete | — |
 | CLI: config (show active paths and settings) | ✅ Complete | — |
 | ASCII family tree visualization | ✅ Complete | — |
@@ -91,10 +91,16 @@ Key design principles:
 | GeoJSON place export (`kinforge export geojson`) | ✅ Complete | — |
 | Enhanced statistics (`kinforge report stats --detailed`) | ✅ Complete | — |
 | Interactive TUI browser (`kinforge tui`) | ✅ Complete | — |
+| TUI: add-event popup from detail panel (`a` key) | ✅ Complete | — |
+| TUI: source delete with confirm popup (`x` key in Sources tab) | ✅ Complete | — |
+| TUI Stats: top-5 places by event count | ✅ Complete | — |
+| `kinforge export markdown` — Markdown family register | ✅ Complete | — |
+| `kinforge report places` — places sorted by event count | ✅ Complete | — |
+| `individual_report` shows linked Research Tasks | ✅ Complete | tested |
 | Plugin API skeleton | ✅ Skeleton present | — |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 90 tests passing, 0 failures, 0 warnings**
+**Total: 100 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -521,7 +527,9 @@ Opens an interactive terminal UI with four tabs:
 | `p` | Tasks | Cycle selected task's priority (Low → Medium → High → Low) |
 | `x` | Tasks | Delete selected task |
 | `e` | People | Edit primary name of selected person (prefilled popup) |
+| `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
 | `x` | People | Open confirm-delete popup for selected person |
+| `x` | Sources | Open confirm-delete popup for selected source |
 | `s` | People | Toggle sort order (name ↔ birth year) |
 | `g` | People, Tasks, Sources | Jump to top of list |
 | `G` | People, Tasks, Sources | Jump to bottom of list |
@@ -621,6 +629,14 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `e` in People tab — edit primary name (prefilled popup, works from list and detail panel)
 - [x] TUI: person detail panel shows Notes section and media attachment count
 - [x] `kinforge export sources-csv` — all sources as CSV (id, title, author, year, citation_count)
+
+**v1.4.0 (Phase 17–18):**
+- [x] TUI: `a` in person detail panel — add-event popup (14 types via ←/→, date, place)
+- [x] `kinforge person show` — linked Research Tasks section
+- [x] TUI: `x` in Sources tab — confirm-delete popup for sources
+- [x] TUI Stats: Top Places section (top 5 places by event count)
+- [x] `kinforge export markdown` — self-contained Markdown family register
+- [x] `kinforge report places` — all places sorted by event count with coordinates
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

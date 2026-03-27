@@ -6,7 +6,7 @@ use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
     ancestor_report, descendant_report, family_group_sheet, individual_report, narrative_report,
-    people_list_report, sources_report, timeline_report,
+    people_list_report, places_report, sources_report, timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 use std::collections::HashMap;
@@ -55,6 +55,8 @@ pub enum ReportCommands {
     Sources,
     /// Prose narrative biography for a person
     Narrative { id: String },
+    /// All places with event counts, sorted by popularity
+    Places,
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -185,6 +187,9 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         ReportCommands::Narrative { id } => {
             let pid = app.resolve_person_id(&id)?;
             print!("{}", narrative_report(app.database(), &pid)?);
+        }
+        ReportCommands::Places => {
+            print!("{}", places_report(app.database())?);
         }
     }
     Ok(())

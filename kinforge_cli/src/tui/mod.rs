@@ -133,6 +133,19 @@ fn run(
                         state.reload_people(app);
                     }
 
+                    events::Action::DeleteSource(sid) => {
+                        let _ = app.delete_source(&sid);
+                        if state.source_detail_open {
+                            state.source_detail_open = false;
+                            state.source_detail_scroll = 0;
+                        }
+                        state.reload_sources(app);
+                        // clamp selection
+                        if state.sources_selected > 0 && state.sources_selected >= state.sources.len() {
+                            state.sources_selected = state.sources.len().saturating_sub(1);
+                        }
+                    }
+
                     events::Action::CreateEvent(pid, type_name, date_str, place_str) => {
                         let event_type: EventType = type_name.parse().unwrap_or(EventType::Other(type_name));
                         let date = if date_str.is_empty() {
@@ -144,8 +157,9 @@ fn run(
                         };
                         let place = if place_str.is_empty() { None } else { Some(place_str.as_str()) };
                         let _ = app.add_event(pid.clone(), event_type, date, place, None);
-                        // Refresh detail panel
+                        // Refresh detail panel and stats
                         state.detail_events = app.list_events_for_person(&pid).unwrap_or_default();
+                        state.reload_top_places(app);
                     }
 
                     events::Action::None => {}

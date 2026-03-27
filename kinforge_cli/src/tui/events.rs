@@ -17,6 +17,7 @@ pub enum Action {
     CreateSource(String, String),  // (title, author)
     DeletePerson(PersonId),
     CreateEvent(PersonId, String, String, String), // (person_id, type_name, date_str, place_str)
+    DeleteSource(SourceId),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -212,6 +213,18 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             state.source_create_author.clear();
             state.source_create_field = 0;
             state.mode = InputMode::SourceCreate;
+            Action::None
+        }
+
+        // Delete source: press 'x' in Sources tab (when no detail open)
+        KeyCode::Char('x') if state.active_tab == Tab::Sources && !state.source_detail_open => {
+            let info = state.selected_source().map(|s| (s.title.clone(), s.id.clone()));
+            if let Some((title, sid)) = info {
+                state.confirm_name = title;
+                state.confirm_source_id = Some(sid);
+                state.confirm_person_id = None;
+                state.mode = InputMode::ConfirmDelete;
+            }
             Action::None
         }
 
@@ -479,16 +492,18 @@ fn handle_person_edit(state: &mut TuiState, key: KeyEvent) -> Action {
 fn handle_confirm_delete(state: &mut TuiState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
+            state.confirm_name.clear();
+            state.mode = InputMode::Normal;
             if let Some(pid) = state.confirm_person_id.take() {
-                state.confirm_name.clear();
-                state.mode = InputMode::Normal;
                 return Action::DeletePerson(pid);
             }
-            state.mode = InputMode::Normal;
+            if let Some(sid) = state.confirm_source_id.take() {
+                return Action::DeleteSource(sid);
+            }
         }
         _ => {
-            // Any other key cancels
             state.confirm_person_id = None;
+            state.confirm_source_id = None;
             state.confirm_name.clear();
             state.mode = InputMode::Normal;
         }

@@ -1177,6 +1177,65 @@ fn source_delete_cascades_citations() {
     assert!(a.database().get_citation(&cit.id).is_err());
 }
 
+// ── Phase 18 tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn places_report_renders_with_event_counts() {
+    use kinforge_reports::places_report;
+    let a = app();
+    let p = a.add_person(Some("Nelson"), Some("Mandela"), Sex::Male, None).unwrap();
+    a.add_place("Johannesburg", Some(-26.2041), Some(28.0473), None).unwrap();
+    let ev = a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        None,
+        Some("Mvezo, Eastern Cape"),
+        None,
+    ).unwrap();
+    let report = places_report(&a.database()).unwrap();
+    assert!(report.contains("Mvezo, Eastern Cape"));
+    assert!(report.contains("1 event"));
+    // Johannesburg has 0 events
+    assert!(report.contains("Johannesburg"));
+    let _ = ev;
+}
+
+#[test]
+fn source_delete_removes_from_list() {
+    let a = app();
+    let s = a.add_source("Temp Source", None, None, None, None, None).unwrap();
+    let sources = a.list_sources().unwrap();
+    assert_eq!(sources.len(), 1);
+    a.delete_source(&s.id).unwrap();
+    let sources = a.list_sources().unwrap();
+    assert!(sources.is_empty());
+}
+
+#[test]
+fn list_all_events_returns_all() {
+    let a = app();
+    let p1 = a.add_person(Some("Ann"), None, Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("Bob"), None, Sex::Male, None).unwrap();
+    a.add_event(p1.id.clone(), EventType::Birth, None, None, None).unwrap();
+    a.add_event(p2.id.clone(), EventType::Birth, None, None, None).unwrap();
+    a.add_event(p2.id.clone(), EventType::Death, None, None, None).unwrap();
+    let all = a.database().list_all_events().unwrap();
+    assert_eq!(all.len(), 3);
+}
+
+#[test]
+fn task_with_notes_roundtrip() {
+    let a = app();
+    let t = a.add_task(
+        "Find emigration record",
+        None,
+        TaskPriority::Medium,
+        Some("Check New York passenger lists 1880–1910"),
+    ).unwrap();
+    let fetched = a.get_task(&t.id).unwrap();
+    assert_eq!(fetched.notes, Some("Check New York passenger lists 1880–1910".to_string()));
+}
+
 #[test]
 fn task_in_progress_status_roundtrip() {
     let a = app();
@@ -1187,4 +1246,28 @@ fn task_in_progress_status_roundtrip() {
     assert_eq!(updated.status, TaskStatus::InProgress);
     let fetched = a.get_task(&updated.id).unwrap();
     assert_eq!(fetched.status, TaskStatus::InProgress);
+}
+
+#[test]
+fn event_place_linked_via_name_on_add() {
+    // Adding an event with a place name should create a new Place record
+    let a = app();
+    let p = a.add_person(Some("George"), Some("Washington"), Sex::Male, None).unwrap();
+    let ev = a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        None,
+        Some("Westmoreland County, Virginia"),
+        None,
+    ).unwrap();
+    let place_id = ev.place_id.expect("place_id should be set");
+    let place = a.database().get_place(&place_id).unwrap();
+    assert_eq!(place.name, "Westmoreland County, Virginia");
+    // Event count for that place
+    let all_events = a.database().list_all_events().unwrap();
+    let events_at_place: Vec<_> = all_events
+        .iter()
+        .filter(|e| e.place_id.as_ref() == Some(&place_id))
+        .collect();
+    assert_eq!(events_at_place.len(), 1);
 }

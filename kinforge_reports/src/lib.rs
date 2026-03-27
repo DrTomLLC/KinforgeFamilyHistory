@@ -1122,6 +1122,75 @@ pub fn html_export(db: &Database) -> KinforgeResult<String> {
     Ok(out)
 }
 
+// ─── places report ──────────────────────────────────────────────────────────
+
+/// Generate a colored list of all places, sorted by number of linked events (descending).
+pub fn places_report(db: &Database) -> KinforgeResult<String> {
+    use std::collections::HashMap;
+
+    let places = db.list_places()?;
+    let all_events = db.list_all_events()?;
+
+    // Count events per place
+    let mut event_counts: HashMap<String, usize> = HashMap::new();
+    for ev in &all_events {
+        if let Some(ref pid) = ev.place_id {
+            *event_counts.entry(pid.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    let mut place_rows: Vec<_> = places
+        .iter()
+        .map(|p| {
+            let count = event_counts.get(&p.id.to_string()).copied().unwrap_or(0);
+            (p, count)
+        })
+        .collect();
+    place_rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.name.cmp(&b.0.name)));
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        format!("  {} place{} in database  ", places.len(), if places.len() == 1 { "" } else { "s" })
+            .bold()
+            .bright_cyan()
+            .on_black()
+    ));
+
+    if place_rows.is_empty() {
+        out.push_str(&format!("{}\n", "  (no places recorded)".bright_black()));
+        return Ok(out);
+    }
+
+    for (place, count) in &place_rows {
+        let coord_str = match (place.latitude, place.longitude) {
+            (Some(lat), Some(lon)) => format!(" {}", format!("({:.4}°, {:.4}°)", lat, lon).bright_black()),
+            _ => String::new(),
+        };
+        let parent_str = if let Some(ref par_id) = place.parent_id {
+            db.get_place(par_id)
+                .map(|par| format!(" ∈ {}", par.name.bright_black()))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let count_str = if *count > 0 {
+            format!("  {}", format!("{} event{}", count, if *count == 1 { "" } else { "s" }).yellow())
+        } else {
+            format!("  {}", "no events".bright_black())
+        };
+        out.push_str(&format!(
+            "  {} {}{}{}{}\n",
+            fmt_id(&place.id.to_string()),
+            place.name.bold(),
+            parent_str,
+            coord_str,
+            count_str,
+        ));
+    }
+    Ok(out)
+}
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
