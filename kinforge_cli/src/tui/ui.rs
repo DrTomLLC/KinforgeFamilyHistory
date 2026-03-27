@@ -73,6 +73,59 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     } else {
         draw_people_list(frame, state, area);
     }
+
+    if state.mode == InputMode::PersonCreate {
+        draw_person_create_popup(frame, state, area);
+    }
+}
+
+fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 50_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 2;
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: 5,
+    };
+
+    let cursor = "_";
+    let given_text = if state.person_create_field == 0 {
+        format!("{}{}", state.person_create_given, cursor)
+    } else {
+        state.person_create_given.clone()
+    };
+    let surname_text = if state.person_create_field == 1 {
+        format!("{}{}", state.person_create_surname, cursor)
+    } else {
+        state.person_create_surname.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Given:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(given_text, if state.person_create_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Surname: ", Style::default().fg(Color::Cyan)),
+            Span::styled(surname_text, if state.person_create_field == 1 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" New Person — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Green)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
 }
 
 fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -517,12 +570,13 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
             state.filtered_people.len()
         ),
         InputMode::TaskCreate => " Type task description  Enter: save  Esc: cancel".to_string(),
+        InputMode::PersonCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
                     " ESC/Enter: close panel  ↑↓/jk: scroll  /: search  Tab: next tab  q: quit".to_string()
                 } else {
-                    " Tab: next tab  ↑↓/jk: navigate  /: search  Enter: detail  q: quit"
+                    " Tab: next tab  ↑↓/jk: navigate  n: new  /: search  Enter: detail  q: quit"
                         .to_string()
                 }
             }

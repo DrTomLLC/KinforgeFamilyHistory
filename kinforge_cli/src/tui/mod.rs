@@ -89,6 +89,13 @@ fn run(
                         state.reload_tasks(app);
                     }
 
+                    events::Action::CreatePerson(given, surname) => {
+                        let g = if given.is_empty() { None } else { Some(given.as_str()) };
+                        let s = if surname.is_empty() { None } else { Some(surname.as_str()) };
+                        let _ = app.add_person(g, s, kinforge_core::models::Sex::Unknown, None);
+                        state.reload_people(app);
+                    }
+
                     events::Action::None => {}
                 }
             }

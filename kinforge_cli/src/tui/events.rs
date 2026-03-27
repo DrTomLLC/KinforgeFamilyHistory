@@ -12,6 +12,7 @@ pub enum Action {
     CreateTask(String),
     CycleTaskPriority(TaskId),
     DeleteTask(TaskId),
+    CreatePerson(String, String), // (given, surname)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -29,6 +30,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::Normal => handle_normal(state, key),
         InputMode::Search => handle_search(state, key),
         InputMode::TaskCreate => handle_task_create(state, key),
+        InputMode::PersonCreate => handle_person_create(state, key),
     }
 }
 
@@ -133,6 +135,15 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             }
             _ => Action::None,
         },
+
+        // New person: press 'n' in People tab (when no detail/search open)
+        KeyCode::Char('n') if state.active_tab == Tab::People && !state.detail_open && !state.search_active => {
+            state.person_create_given.clear();
+            state.person_create_surname.clear();
+            state.person_create_field = 0;
+            state.mode = InputMode::PersonCreate;
+            Action::None
+        }
 
         // Task quick-complete: press 'd' or 'c' on a task
         KeyCode::Char('d') | KeyCode::Char('c') if state.active_tab == Tab::Tasks => {
@@ -241,6 +252,41 @@ fn handle_task_create(state: &mut TuiState, key: KeyEvent) -> Action {
         }
         KeyCode::Char(c) => {
             state.task_create_buf.push(c);
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_person_create(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            state.person_create_field = 1 - state.person_create_field;
+        }
+        KeyCode::Enter => {
+            let given = state.person_create_given.trim().to_string();
+            let surname = state.person_create_surname.trim().to_string();
+            state.mode = InputMode::Normal;
+            if !given.is_empty() || !surname.is_empty() {
+                return Action::CreatePerson(given, surname);
+            }
+        }
+        KeyCode::Backspace => {
+            if state.person_create_field == 0 {
+                state.person_create_given.pop();
+            } else {
+                state.person_create_surname.pop();
+            }
+        }
+        KeyCode::Char(c) => {
+            if state.person_create_field == 0 {
+                state.person_create_given.push(c);
+            } else {
+                state.person_create_surname.push(c);
+            }
         }
         _ => {}
     }

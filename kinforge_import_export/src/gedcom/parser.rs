@@ -3,6 +3,8 @@ use kinforge_core::{models::*, KinforgeError, KinforgeResult};
 use kinforge_storage::Database;
 use std::collections::{HashMap, HashSet};
 
+use crate::ImportStats;
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Import a GEDCOM 5.5 file into the database.
@@ -107,14 +109,6 @@ pub fn import_gedcom(content: &str, db: &Database) -> KinforgeResult<ImportStats
     Ok(stats)
 }
 
-#[derive(Debug, Default)]
-pub struct ImportStats {
-    pub people: usize,
-    pub events: usize,
-    pub sources: usize,
-    pub relationships: usize,
-    pub duplicates_skipped: usize,
-}
 
 // ── GEDCOM record / line structures ──────────────────────────────────────────
 

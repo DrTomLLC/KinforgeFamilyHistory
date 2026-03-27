@@ -3,6 +3,8 @@ use kinforge_storage::Database;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
+use crate::ImportStats;
+
 #[derive(Serialize, Deserialize)]
 struct KinforgeExport {
     version: String,
@@ -29,30 +31,38 @@ pub fn export_json<W: Write>(db: &Database, writer: &mut W) -> KinforgeResult<()
         .map_err(|e| KinforgeError::ImportExport(e.to_string()))
 }
 
-pub fn import_json<R: Read>(db: &Database, reader: &mut R) -> KinforgeResult<()> {
+pub fn import_json<R: Read>(db: &Database, reader: &mut R) -> KinforgeResult<ImportStats> {
     let mut content = String::new();
     reader.read_to_string(&mut content)?;
 
     let export: KinforgeExport =
         serde_json::from_str(&content).map_err(|e| KinforgeError::ImportExport(e.to_string()))?;
 
+    let mut stats = ImportStats::default();
+
     for place in &export.places {
         db.insert_place(place)?;
+        stats.places += 1;
     }
     for person in &export.people {
         db.insert_person(person)?;
+        stats.people += 1;
     }
     for source in &export.sources {
         db.insert_source(source)?;
+        stats.sources += 1;
     }
     for event in &export.events {
         db.insert_event(event)?;
+        stats.events += 1;
     }
     for rel in &export.relationships {
         db.insert_relationship(rel)?;
+        stats.relationships += 1;
     }
     for citation in &export.citations {
         db.insert_citation(citation)?;
     }
-    Ok(())
+
+    Ok(stats)
 }

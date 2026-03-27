@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-03-27
 > **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 0.8.0
+> **Version:** 0.9.0
 
 ---
 
@@ -450,7 +450,7 @@ kinforge import gedcom <INPUT>
 kinforge import json <INPUT>
 ```
 
-Import is additive — existing records are not deleted; GEDCOM import skips people with the same name + birth year already in the database.
+Import is additive — existing records are not deleted. GEDCOM import skips people with the same name + birth year already in the database. Both GEDCOM and JSON imports print a summary of records added (people, events, sources, relationships, places).
 
 ### `reminders`
 
@@ -497,6 +497,7 @@ Opens an interactive terminal UI with four tabs:
 |-----|---------|--------|
 | `Tab` / `Shift-Tab` | Any | Switch tabs |
 | `↑` / `↓` or `k` / `j` | Any | Navigate list or scroll detail panel |
+| `n` | People | Open inline popup to create a new person |
 | `/` | People | Enter search/filter mode |
 | `Esc` | Search / detail panel | Cancel search or close detail panel |
 | `Enter` | People, Sources | Open detail panel; close if already open |
@@ -578,8 +579,8 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: task quick-complete (`d`/`c`), new task (`n`), priority cycle (`p`), delete (`x`)
 
 **Near-term:**
-- [ ] Batch import deduplication report (CSV diff before/after)
-- [ ] TUI: person add/edit form (inline popup, similar to task creation)
+- [x] JSON import statistics (people, events, sources, relationships, places counts)
+- [x] TUI: inline person creation (People tab, `n` key, two-field popup)
 
 **Long-term:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

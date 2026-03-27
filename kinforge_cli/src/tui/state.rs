@@ -46,6 +46,7 @@ pub enum InputMode {
     Normal,
     Search,
     TaskCreate,
+    PersonCreate,
 }
 
 // ── Row types ─────────────────────────────────────────────────────────────────
@@ -113,6 +114,11 @@ pub struct TuiState {
 
     // Inline task creation
     pub task_create_buf: String,
+
+    // Inline person creation
+    pub person_create_given: String,
+    pub person_create_surname: String,
+    pub person_create_field: u8, // 0 = given, 1 = surname
 }
 
 impl TuiState {
@@ -179,6 +185,9 @@ impl TuiState {
             mode: InputMode::Normal,
             should_quit: false,
             task_create_buf: String::new(),
+            person_create_given: String::new(),
+            person_create_surname: String::new(),
+            person_create_field: 0,
         })
     }
 
@@ -221,6 +230,31 @@ impl TuiState {
         // Skip to next selectable row if on a header
         if matches!(self.task_rows.get(self.tasks_selected), Some(TaskRow::Header(_))) {
             self.tasks_selected = first_task_item_idx(&self.task_rows);
+        }
+    }
+
+    /// Reload the people list from the DB and recompute the filter.
+    pub fn reload_people(&mut self, app: &Application) {
+        use chrono::Datelike;
+        let raw_people = app.list_people().unwrap_or_default();
+        self.people.clear();
+        for p in raw_people {
+            let events = app.list_events_for_person(&p.id).unwrap_or_default();
+            let birth_year = events
+                .iter()
+                .find(|e| matches!(e.event_type, EventType::Birth))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                    _ => None,
+                });
+            let display_name = p.display_name();
+            self.people.push(PersonRow { id: p.id, display_name, birth_year });
+        }
+        self.recompute_filter();
+        // Select the last person (just added)
+        if !self.filtered_people.is_empty() {
+            self.people_selected = self.filtered_people.len() - 1;
         }
     }
 }
