@@ -19,3 +19,4 @@ kinforge_import_export = { workspace = true }
 kinforge_query = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+colored = { workspace = true }

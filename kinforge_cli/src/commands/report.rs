@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::PersonId;
 use kinforge_reports::{ancestor_report, descendant_report, individual_report, people_list_report};
@@ -37,14 +38,30 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
     match cmd {
         ReportCommands::Stats => {
             let s = app.stats()?;
-            println!("Database statistics:");
-            println!("  People:        {}", s.people);
-            println!("  Events:        {}", s.events);
-            println!("  Relationships: {}", s.relationships);
-            println!("  Places:        {}", s.places);
-            println!("  Sources:       {}", s.sources);
-            println!("  Citations:     {}", s.citations);
-            println!("  Database:      {}", app.config.database_path.display());
+            println!(
+                "{}\n",
+                "  Database Statistics  ".bold().bright_cyan().on_black()
+            );
+            let rows: &[(&str, String)] = &[
+                ("People        ", s.people.to_string()),
+                ("Events        ", s.events.to_string()),
+                ("Relationships ", s.relationships.to_string()),
+                ("Places        ", s.places.to_string()),
+                ("Sources       ", s.sources.to_string()),
+                ("Citations     ", s.citations.to_string()),
+            ];
+            for (label, value) in rows {
+                println!(
+                    "  {} {}",
+                    label.cyan(),
+                    value.bold().yellow()
+                );
+            }
+            println!(
+                "\n  {} {}",
+                "Database:".cyan(),
+                app.config.database_path.display().to_string().bright_black()
+            );
         }
         ReportCommands::People => {
             print!("{}", people_list_report(&app.db)?);

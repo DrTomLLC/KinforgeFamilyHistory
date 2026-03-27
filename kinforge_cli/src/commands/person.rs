@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::{NameType, PersonId, Sex};
 use kinforge_reports::individual_report;
@@ -59,20 +60,32 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 notes.as_deref(),
             )?;
             println!(
-                "Added person: {} (ID: {})",
-                person.display_name(),
-                person.id
+                "{} {} {}",
+                "Added:".green().bold(),
+                person.display_name().bold(),
+                format!("({})", person.id).bright_black()
             );
         }
 
         PersonCommands::List => {
             let people = app.list_people()?;
             if people.is_empty() {
-                println!("No people in database.");
+                println!("{}", "No people in database.".bright_black());
             } else {
-                println!("{} person(s):", people.len());
+                println!(
+                    "{}\n",
+                    format!("  {} people  ", people.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
                 for p in &people {
-                    println!("  [{}] {} ({})", p.id, p.display_name(), p.sex);
+                    println!(
+                        "  {} {} {}",
+                        p.id.to_string().bright_black(),
+                        p.display_name().bold(),
+                        format!("({})", p.sex).bright_black()
+                    );
                 }
             }
         }
@@ -93,7 +106,11 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 person.notes = Some(n);
             }
             app.update_person(person)?;
-            println!("Updated person {}.", id);
+            println!(
+                "{} {}",
+                "Updated:".green().bold(),
+                id.bright_black()
+            );
         }
 
         PersonCommands::AddName {
@@ -106,16 +123,22 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
             let nt: NameType = name_type.parse()?;
             let person = app.add_name_to_person(&pid, given.as_deref(), surname.as_deref(), nt)?;
             println!(
-                "Added name to {} — now has {} name(s).",
-                person.display_name(),
-                person.names.len()
+                "{} {} {} {}",
+                "Added name to".green().bold(),
+                person.display_name().bold(),
+                "\u{2014}".bright_black(),
+                format!("{} name(s) total", person.names.len()).bright_black()
             );
         }
 
         PersonCommands::Delete { id } => {
             let pid = PersonId::from_str(&id)?;
             app.delete_person(&pid)?;
-            println!("Deleted person {}.", id);
+            println!(
+                "{} {}",
+                "Deleted:".yellow().bold(),
+                id.bright_black()
+            );
         }
     }
     Ok(())

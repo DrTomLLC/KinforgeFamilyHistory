@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_config::Config;
 use std::path::PathBuf;
@@ -102,15 +103,43 @@ fn main() -> Result<()> {
 
     // Handle the Config meta-command before opening DB
     if matches!(cli.command, Commands::Config) {
-        println!("Database path: {}", config.database_path.display());
-        println!("Backup on open: {}", config.backup_on_open);
-        println!("Max backups:    {}", config.max_backups);
-        println!("Log level:      {}", config.log_level);
+        println!(
+            "{}\n",
+            "  Kinforge Configuration  ".bold().bright_cyan().on_black()
+        );
+        println!(
+            "  {} {}",
+            "Database path:".cyan(),
+            config.database_path.display().to_string().bold()
+        );
+        println!(
+            "  {} {}",
+            "Backup on open:".cyan(),
+            config.backup_on_open.to_string().yellow()
+        );
+        println!(
+            "  {} {}",
+            "Max backups:   ".cyan(),
+            config.max_backups.to_string().yellow()
+        );
+        println!(
+            "  {} {}",
+            "Log level:     ".cyan(),
+            config.log_level.bright_black()
+        );
         if let Some(ref dir) = config.default_export_dir {
-            println!("Export dir:     {}", dir.display());
+            println!(
+                "  {} {}",
+                "Export dir:    ".cyan(),
+                dir.display().to_string().bold()
+            );
         }
         if let Some(p) = Config::default_config_path() {
-            println!("Config file:    {}", p.display());
+            println!(
+                "  {} {}",
+                "Config file:   ".cyan(),
+                p.display().to_string().bright_black()
+            );
         }
         return Ok(());
     }

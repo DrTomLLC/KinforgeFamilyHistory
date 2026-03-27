@@ -42,3 +42,4 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 toml = "0.8"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
+colored = "2"

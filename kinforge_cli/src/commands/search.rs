@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_query::{PersonQuery, SourceQuery};
 
@@ -30,11 +31,28 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             }
             let results = q.run(&app.db)?;
             if results.is_empty() {
-                println!("No people matching '{}'.", query);
+                println!(
+                    "{} {}{}{}",
+                    "No people matching".bright_black(),
+                    "\u{2018}".bright_black(),
+                    query.yellow(),
+                    "\u{2019}.".bright_black()
+                );
             } else {
-                println!("{} result(s):", results.len());
+                println!(
+                    "{}\n",
+                    format!("  {} result(s)  ", results.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
                 for p in &results {
-                    println!("  [{}] {} ({})", p.id, p.display_name(), p.sex);
+                    println!(
+                        "  {} {} {}",
+                        p.id.to_string().bright_black(),
+                        p.display_name().bold(),
+                        format!("({})", p.sex).bright_black()
+                    );
                 }
             }
         }
@@ -50,12 +68,32 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             }
             let results = q.run(&app.db)?;
             if results.is_empty() {
-                println!("No sources matching '{}'.", query);
+                println!(
+                    "{} {}{}{}",
+                    "No sources matching".bright_black(),
+                    "\u{2018}".bright_black(),
+                    query.yellow(),
+                    "\u{2019}.".bright_black()
+                );
             } else {
-                println!("{} result(s):", results.len());
+                println!(
+                    "{}\n",
+                    format!("  {} result(s)  ", results.len())
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
                 for s in &results {
-                    let year = s.year.map(|y| format!(" ({})", y)).unwrap_or_default();
-                    println!("  [{}] {}{}", s.id, s.title, year);
+                    let year = s
+                        .year
+                        .map(|y| format!(" {}", format!("({})", y).yellow()))
+                        .unwrap_or_default();
+                    println!(
+                        "  {} {}{}",
+                        s.id.to_string().bright_black(),
+                        s.title.bold(),
+                        year
+                    );
                 }
             }
         }

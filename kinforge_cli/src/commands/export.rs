@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
+use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_import_export::{export_gedcom, export_json};
 use std::fs::File;
@@ -25,13 +26,21 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
             let file = File::create(&output)?;
             let mut writer = BufWriter::new(file);
             export_gedcom(&app.db, &mut writer)?;
-            println!("Exported GEDCOM to {}", output);
+            println!(
+                "{} {}",
+                "Exported GEDCOM \u{2192}".green().bold(),
+                output.bold()
+            );
         }
         ExportCommands::Json { output } => {
             let file = File::create(&output)?;
             let mut writer = BufWriter::new(file);
             export_json(&app.db, &mut writer)?;
-            println!("Exported JSON to {}", output);
+            println!(
+                "{} {}",
+                "Exported JSON \u{2192}".green().bold(),
+                output.bold()
+            );
         }
     }
     Ok(())
