@@ -123,6 +123,40 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
             if let Some(ref n) = s.notes {
                 println!("{} {}", "Notes:      ".cyan(), n);
             }
+            let citations = app.list_citations_for_source(&sid)?;
+            if citations.is_empty() {
+                println!("{}", "\nNo citations reference this source.".bright_black());
+            } else {
+                println!(
+                    "\n{} {}",
+                    "Citations:  ".cyan(),
+                    citations.len().to_string().bold()
+                );
+                for c in &citations {
+                    let event_label = app
+                        .get_event(&c.event_id)
+                        .ok()
+                        .map(|e| {
+                            let name = app
+                                .get_person(&e.person_id)
+                                .map(|p| p.display_name())
+                                .unwrap_or_else(|_| e.person_id.to_string());
+                            format!("{} \u{2014} {}", name, e.event_type)
+                        })
+                        .unwrap_or_else(|| "?".to_string());
+                    let page = c
+                        .page
+                        .as_deref()
+                        .map(|p| format!(" p.{}", p))
+                        .unwrap_or_default();
+                    println!(
+                        "  {} {}{}",
+                        c.id.to_string().bright_black(),
+                        event_label.bold(),
+                        page.yellow()
+                    );
+                }
+            }
         }
 
         SourceCommands::Update {

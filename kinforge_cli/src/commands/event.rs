@@ -47,6 +47,9 @@ pub enum EventCommands {
         /// Second date for 'between' qualifier (YYYY-MM-DD)
         #[arg(long)]
         date2: Option<String>,
+        /// Remove the date entirely
+        #[arg(long)]
+        clear_date: bool,
         /// Place name — searched first; created if not found
         #[arg(long)]
         place: Option<String>,
@@ -205,6 +208,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             date,
             qualifier,
             date2,
+            clear_date,
             place,
             notes,
         } => {
@@ -213,7 +217,9 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             if let Some(ref et) = event_type {
                 event.event_type = et.parse().unwrap_or(EventType::Other(et.clone()));
             }
-            if let Some(ref d) = date {
+            if clear_date {
+                event.date = None;
+            } else if let Some(ref d) = date {
                 event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
             }
             if let Some(ref place_name) = place {

@@ -428,6 +428,80 @@ impl Application {
                     ),
                 });
             }
+
+            // Birth date after death date
+            let birth_date = events
+                .iter()
+                .find(|e| matches!(e.event_type, EventType::Birth))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(*nd),
+                    _ => None,
+                });
+            let death_date = events
+                .iter()
+                .find(|e| matches!(e.event_type, EventType::Death))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(*nd),
+                    _ => None,
+                });
+            if let (Some(b), Some(d)) = (birth_date, death_date) {
+                if b > d {
+                    issues.push(IntegrityIssue {
+                        severity: "error",
+                        entity_type: "Person".to_string(),
+                        id: person.id.to_string(),
+                        message: format!(
+                            "{} has birth date ({}) after death date ({})",
+                            person.display_name(),
+                            b.format("%Y-%m-%d"),
+                            d.format("%Y-%m-%d")
+                        ),
+                    });
+                }
+            }
+
+            // Duplicate events (same type on same person)
+            let mut seen_types: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for event in &events {
+                let key = event.event_type.to_string();
+                // Only flag duplicates for singleton event types
+                let singleton = matches!(
+                    event.event_type,
+                    EventType::Birth | EventType::Death | EventType::Burial | EventType::Baptism
+                );
+                if singleton && !seen_types.insert(key.clone()) {
+                    issues.push(IntegrityIssue {
+                        severity: "warning",
+                        entity_type: "Event".to_string(),
+                        id: event.id.to_string(),
+                        message: format!(
+                            "duplicate {} event for {} (multiple {} events recorded)",
+                            key,
+                            person.display_name(),
+                            key
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Orphan sources: sources with zero citations
+        for source in self.db.list_sources()? {
+            let citations = self.db.list_citations_for_source(&source.id)?;
+            if citations.is_empty() {
+                issues.push(IntegrityIssue {
+                    severity: "warning",
+                    entity_type: "Source".to_string(),
+                    id: source.id.to_string(),
+                    message: format!(
+                        "'{}' has no citations — not referenced by any event",
+                        source.title
+                    ),
+                });
+            }
         }
 
         Ok(issues)

@@ -4,7 +4,7 @@ use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_reports::{
     ancestor_report, descendant_report, family_group_sheet, individual_report, people_list_report,
-    timeline_report,
+    sources_report, timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 
@@ -44,6 +44,8 @@ pub enum ReportCommands {
         #[arg(long, default_value = "3")]
         depth: u32,
     },
+    /// All sources with citation counts
+    Sources,
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -105,6 +107,9 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         ReportCommands::AncestorTree { id, depth } => {
             let pid = app.resolve_person_id(&id)?;
             print!("{}", ascii_ancestor_tree(&app.db, &pid, depth)?);
+        }
+        ReportCommands::Sources => {
+            print!("{}", sources_report(&app.db)?);
         }
     }
     Ok(())

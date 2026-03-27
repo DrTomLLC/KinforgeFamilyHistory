@@ -36,6 +36,8 @@ pub enum PlaceCommands {
         #[arg(long)]
         parent: Option<String>,
     },
+    /// List all sub-places (children) of a place
+    Children { id: String },
     /// Delete a place
     Delete { id: String },
 }
@@ -190,6 +192,42 @@ pub fn handle(cmd: PlaceCommands, app: &Application) -> Result<()> {
                 "Updated:".green().bold(),
                 id.bright_black()
             );
+        }
+
+        PlaceCommands::Children { id } => {
+            let pid = app.resolve_place_id(&id)?;
+            let parent = app.get_place(&pid)?;
+            let all = app.list_places()?;
+            let children: Vec<_> = all.iter().filter(|p| p.parent_id.as_ref() == Some(&pid)).collect();
+            if children.is_empty() {
+                println!(
+                    "{} {}",
+                    "No sub-places under".bright_black(),
+                    parent.name.bold()
+                );
+            } else {
+                println!(
+                    "{}\n",
+                    format!("  {} sub-place(s) under {}  ", children.len(), parent.name)
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
+                for p in &children {
+                    let coords = match (p.latitude, p.longitude) {
+                        (Some(lat), Some(lon)) => {
+                            format!(" {}", format!("({:.4}, {:.4})", lat, lon).bright_black())
+                        }
+                        _ => String::new(),
+                    };
+                    println!(
+                        "  {} {}{}",
+                        p.id.to_string().bright_black(),
+                        p.name.bold(),
+                        coords
+                    );
+                }
+            }
         }
 
         PlaceCommands::Delete { id } => {

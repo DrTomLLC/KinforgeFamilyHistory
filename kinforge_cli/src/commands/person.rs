@@ -29,6 +29,9 @@ pub enum PersonCommands {
         sex: Option<String>,
         #[arg(long)]
         notes: Option<String>,
+        /// Remove the notes field entirely
+        #[arg(long)]
+        clear_notes: bool,
     },
     /// Add an alternative name to a person
     AddName {
@@ -186,13 +189,15 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
             print!("{}", report);
         }
 
-        PersonCommands::Update { id, sex, notes } => {
+        PersonCommands::Update { id, sex, notes, clear_notes } => {
             let pid = app.resolve_person_id(&id)?;
             let mut person = app.get_person(&pid)?;
             if let Some(s) = sex {
                 person.sex = s.parse()?;
             }
-            if let Some(n) = notes {
+            if clear_notes {
+                person.notes = None;
+            } else if let Some(n) = notes {
                 person.notes = Some(n);
             }
             app.update_person(person)?;

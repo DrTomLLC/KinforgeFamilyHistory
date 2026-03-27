@@ -548,3 +548,54 @@ fn append_vital_events(
     }
     Ok(())
 }
+// ─── sources report ──────────────────────────────────────────────────────────
+
+/// Generate a colored list of all sources with per-source citation counts.
+pub fn sources_report(db: &Database) -> KinforgeResult<String> {
+    let sources = db.list_sources()?;
+    let mut out = String::new();
+
+    out.push_str(&format!(
+        "{}\n\n",
+        format!("  {} source(s) in database  ", sources.len())
+            .bold()
+            .bright_cyan()
+            .on_black()
+    ));
+
+    if sources.is_empty() {
+        out.push_str(&format!("{}\n", "No sources recorded.".bright_black()));
+        return Ok(out);
+    }
+
+    for source in &sources {
+        let citation_count = db.list_citations_for_source(&source.id)
+            .map(|c| c.len())
+            .unwrap_or(0);
+
+        let year_str = source
+            .year
+            .map(|y| format!(" {}", format!("({})", y).yellow()))
+            .unwrap_or_default();
+        let author_str = source
+            .author
+            .as_deref()
+            .map(|a| format!(" {}", format!("— {}", a).bright_black()))
+            .unwrap_or_default();
+        let cit_str = if citation_count == 0 {
+            format!(" {}", "[no citations]".bright_red())
+        } else {
+            format!(" {}", format!("[{} citation(s)]", citation_count).bright_black())
+        };
+
+        out.push_str(&format!(
+            "  {} {}{}{}{}\n",
+            fmt_id(&source.id.to_string()),
+            source.title.bold(),
+            year_str,
+            author_str,
+            cit_str
+        ));
+    }
+    Ok(out)
+}

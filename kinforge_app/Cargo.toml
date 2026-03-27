@@ -13,3 +13,6 @@ kinforge_import_export = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+kinforge_reports = { workspace = true }

@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use kinforge_core::{models::*, KinforgeResult};
 use kinforge_storage::Database;
 
@@ -88,6 +89,8 @@ pub struct EventQuery {
     pub person_id: Option<PersonId>,
     pub event_type: Option<EventType>,
     pub place_name_contains: Option<String>,
+    pub from_year: Option<i32>,
+    pub to_year: Option<i32>,
 }
 
 impl EventQuery {
@@ -110,6 +113,16 @@ impl EventQuery {
         self
     }
 
+    pub fn from_year(mut self, year: i32) -> Self {
+        self.from_year = Some(year);
+        self
+    }
+
+    pub fn to_year(mut self, year: i32) -> Self {
+        self.to_year = Some(year);
+        self
+    }
+
     pub fn run(&self, db: &Database) -> KinforgeResult<Vec<Event>> {
         let events = if let Some(ref pid) = self.person_id {
             db.list_events_for_person(pid)?
@@ -125,12 +138,37 @@ impl EventQuery {
                         return false;
                     }
                 }
+                // Year range filter
+                if self.from_year.is_some() || self.to_year.is_some() {
+                    let year = e.date.as_ref().and_then(|d| match d {
+                        EventDate::Exact(nd)
+                        | EventDate::Approximate(nd)
+                        | EventDate::Before(nd)
+                        | EventDate::After(nd)
+                        | EventDate::Between(nd, _) => Some(nd.year()),
+                        EventDate::Unknown => None,
+                    });
+                    match year {
+                        None => return false,
+                        Some(y) => {
+                            if let Some(from) = self.from_year {
+                                if y < from {
+                                    return false;
+                                }
+                            }
+                            if let Some(to) = self.to_year {
+                                if y > to {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
                 true
             })
             .collect();
 
         if let Some(ref place_filter) = self.place_name_contains {
-            // Filter by place name (requires extra DB lookups, done in-memory)
             result.retain(|e| {
                 e.place_id.as_ref().is_some_and(|pid| {
                     db.get_place(pid)

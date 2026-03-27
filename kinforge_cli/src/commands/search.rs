@@ -49,6 +49,12 @@ pub enum SearchCommands {
         /// Filter to a specific person (ID or short prefix)
         #[arg(long)]
         person: Option<String>,
+        /// Earliest event year (inclusive)
+        #[arg(long)]
+        from_year: Option<i32>,
+        /// Latest event year (inclusive)
+        #[arg(long)]
+        to_year: Option<i32>,
     },
     /// Search citations by source title fragment
     Citations {
@@ -184,11 +190,13 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             }
         }
 
-        SearchCommands::Events { place, event_type, person } => {
-            if place.is_none() && event_type.is_none() && person.is_none() {
+        SearchCommands::Events { place, event_type, person, from_year, to_year } => {
+            if place.is_none() && event_type.is_none() && person.is_none()
+                && from_year.is_none() && to_year.is_none()
+            {
                 println!(
                     "{}",
-                    "Provide --place, --event-type, and/or --person to filter events.".yellow()
+                    "Provide --place, --event-type, --person, and/or --from-year/--to-year.".yellow()
                 );
                 return Ok(());
             }
@@ -205,6 +213,12 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             if let Some(ref person_input) = person {
                 let pid = app.resolve_person_id(person_input)?;
                 q = q.for_person(pid);
+            }
+            if let Some(f) = from_year {
+                q = q.from_year(f);
+            }
+            if let Some(t) = to_year {
+                q = q.to_year(t);
             }
             let events = q.run(&app.db)?;
             if events.is_empty() {

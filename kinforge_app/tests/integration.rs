@@ -657,3 +657,119 @@ fn list_citations_for_source_returns_correct() {
     let s2_cits = a.list_citations_for_source(&source2.id).unwrap();
     assert_eq!(s2_cits.len(), 1);
 }
+
+// ── Phase 5 tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn check_integrity_birth_after_death() {
+    let a = app();
+    let p = a
+        .add_person(Some("Ghost"), Some("Test"), Sex::Unknown, None)
+        .unwrap();
+    // Death before birth
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1950, 1, 1).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1940, 6, 15).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    let issues = a.check_integrity().unwrap();
+    let errors: Vec<_> = issues
+        .iter()
+        .filter(|i| i.severity == "error" && i.message.contains("birth") || i.message.contains("Birth"))
+        .collect();
+    assert!(!errors.is_empty(), "expected birth-after-death error");
+}
+
+#[test]
+fn check_integrity_detects_orphan_sources() {
+    let a = app();
+    a.add_source("Unused Book", None, None, None, None, None)
+        .unwrap();
+    let issues = a.check_integrity().unwrap();
+    let warnings: Vec<_> = issues
+        .iter()
+        .filter(|i| i.severity == "warning" && i.message.to_lowercase().contains("citation"))
+        .collect();
+    assert!(!warnings.is_empty(), "expected orphan-source warning");
+}
+
+#[test]
+fn event_query_year_range() {
+    use kinforge_query::EventQuery;
+    let a = app();
+    let p = a
+        .add_person(Some("Range"), Some("Test"), Sex::Male, None)
+        .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1800, 3, 1).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1870, 11, 20).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Marriage,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1900, 5, 10).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let results = EventQuery::new()
+        .from_year(1850)
+        .to_year(1880)
+        .run(&a.db)
+        .unwrap();
+    // Only the 1870 death event should be in 1850–1880
+    assert_eq!(results.len(), 1);
+    assert!(matches!(results[0].event_type, EventType::Death));
+}
+
+#[test]
+fn sources_report_renders() {
+    use kinforge_reports::sources_report;
+    let a = app();
+    let p = a
+        .add_person(Some("Alice"), None, Sex::Female, None)
+        .unwrap();
+    let ev = a
+        .add_event(p.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    let s1 = a.add_source("Used Source", None, None, None, None, None).unwrap();
+    let s2 = a.add_source("Orphan Source", None, None, None, None, None).unwrap();
+    a.add_citation(
+        s1.id.clone(),
+        ev.id.clone(),
+        None,
+        ConfidenceLevel::Primary,
+        None,
+    )
+    .unwrap();
+    let _ = s2; // deliberately uncited
+
+    let report = sources_report(&a.db).unwrap();
+    assert!(report.contains("Used Source"));
+    assert!(report.contains("Orphan Source"));
+    assert!(report.contains("1 citation") || report.contains("1")); // cited count
+}

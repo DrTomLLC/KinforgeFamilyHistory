@@ -216,7 +216,7 @@ fn year_from_date(date: &EventDate) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kinforge_core::models::*;
+    use kinforge_core::models::{NameType, Person, PersonName, Relationship, RelationshipType, Sex};
     use kinforge_storage::Database;
 
     fn make_person(db: &Database, given: &str, surname: &str, sex: Sex) -> Person {

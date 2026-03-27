@@ -22,9 +22,12 @@ pub enum RelationshipCommands {
     Show { id: String },
     /// List relationships for a person
     List { person: String },
-    /// Update a relationship's notes
+    /// Update a relationship's type or notes
     Update {
         id: String,
+        /// Change relationship type: parent-child, spouse, sibling
+        #[arg(long)]
+        rel_type: Option<String>,
         #[arg(long)]
         notes: Option<String>,
     },
@@ -132,9 +135,12 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
             }
         }
 
-        RelationshipCommands::Update { id, notes } => {
+        RelationshipCommands::Update { id, rel_type, notes } => {
             let rid = app.resolve_relationship_id(&id)?;
             let mut rel = app.get_relationship(&rid)?;
+            if let Some(ref rt) = rel_type {
+                rel.rel_type = rt.parse()?;
+            }
             if let Some(n) = notes {
                 rel.notes = Some(n);
             }

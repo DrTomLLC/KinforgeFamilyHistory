@@ -1,16 +1,15 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_config::Config;
 use std::path::PathBuf;
 
 mod commands;
 use commands::{
-    citation::CitationCommands, event::EventCommands, export::ExportCommands,
-    import::ImportCommands, person::PersonCommands, place::PlaceCommands,
-    relationship::RelationshipCommands, report::ReportCommands, search::SearchCommands,
-    source::SourceCommands,
+    citation::CitationCommands, config::ConfigCommands, event::EventCommands,
+    export::ExportCommands, import::ImportCommands, person::PersonCommands,
+    place::PlaceCommands, relationship::RelationshipCommands, report::ReportCommands,
+    search::SearchCommands, source::SourceCommands,
 };
 
 #[derive(Parser)]
@@ -82,8 +81,9 @@ enum Commands {
     #[command(subcommand)]
     Search(SearchCommands),
 
-    /// Print the active configuration and data paths
-    Config,
+    /// Manage configuration (show, init, set)
+    #[command(subcommand)]
+    Config(ConfigCommands),
 
     /// Run data integrity checks and report issues
     Check,
@@ -104,47 +104,9 @@ fn main() -> Result<()> {
         config.database_path = db_path;
     }
 
-    // Handle the Config meta-command before opening DB
-    if matches!(cli.command, Commands::Config) {
-        println!(
-            "{}\n",
-            "  Kinforge Configuration  ".bold().bright_cyan().on_black()
-        );
-        println!(
-            "  {} {}",
-            "Database path:".cyan(),
-            config.database_path.display().to_string().bold()
-        );
-        println!(
-            "  {} {}",
-            "Backup on open:".cyan(),
-            config.backup_on_open.to_string().yellow()
-        );
-        println!(
-            "  {} {}",
-            "Max backups:   ".cyan(),
-            config.max_backups.to_string().yellow()
-        );
-        println!(
-            "  {} {}",
-            "Log level:     ".cyan(),
-            config.log_level.bright_black()
-        );
-        if let Some(ref dir) = config.default_export_dir {
-            println!(
-                "  {} {}",
-                "Export dir:    ".cyan(),
-                dir.display().to_string().bold()
-            );
-        }
-        if let Some(p) = Config::default_config_path() {
-            println!(
-                "  {} {}",
-                "Config file:   ".cyan(),
-                p.display().to_string().bright_black()
-            );
-        }
-        return Ok(());
+    // Handle the Config meta-command before opening DB (does not require DB access)
+    if let Commands::Config(cmd) = cli.command {
+        return commands::config::handle(cmd, &config);
     }
 
     let app = Application::open(config)?;
@@ -161,7 +123,7 @@ fn main() -> Result<()> {
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
         Commands::Check => commands::check::handle(&app)?,
-        Commands::Config => unreachable!(),
+        Commands::Config(_) => unreachable!(),
     }
 
     Ok(())
