@@ -26,6 +26,15 @@ pub struct NotesMatch {
     pub notes: String,
 }
 
+/// Metadata about a single backup file.
+#[derive(Debug, Clone)]
+pub struct BackupInfo {
+    pub path: std::path::PathBuf,
+    pub size_bytes: u64,
+    /// Timestamp string extracted from the filename (e.g. "2026-03-27_14-00-00")
+    pub timestamp: String,
+}
+
 pub struct Application {
     db: Database,
     pub config: Config,
@@ -1170,4 +1179,62 @@ fn prune_backups(dir: &Path, max: u32) -> KinforgeResult<()> {
         std::fs::remove_file(oldest.path())?;
     }
     Ok(())
+}
+
+fn backup_dir_for(config: &Config) -> std::path::PathBuf {
+    config
+        .database_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("backups")
+}
+
+fn scan_backup_dir(dir: &std::path::PathBuf) -> KinforgeResult<Vec<BackupInfo>> {
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut infos: Vec<BackupInfo> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "db").unwrap_or(false))
+        .filter_map(|e| {
+            let path = e.path();
+            let size_bytes = e.metadata().ok()?.len();
+            let stem = path.file_stem()?.to_str()?.to_string();
+            // filename: kinforge_2026-03-27_14-00-00.db  → timestamp is after first '_'
+            let timestamp = stem
+                .splitn(2, '_')
+                .nth(1)
+                .unwrap_or(&stem)
+                .to_string();
+            Some(BackupInfo { path, size_bytes, timestamp })
+        })
+        .collect();
+
+    // Newest first
+    infos.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(infos)
+}
+
+impl Application {
+    /// Create a manual backup right now, regardless of `backup_on_open` setting.
+    /// Returns the path to the new backup file.
+    pub fn backup_now(&self) -> KinforgeResult<std::path::PathBuf> {
+        create_backup(&self.config)?;
+        let dir = backup_dir_for(&self.config);
+        let infos = scan_backup_dir(&dir)?;
+        infos
+            .into_iter()
+            .next()
+            .map(|i| i.path)
+            .ok_or_else(|| KinforgeError::NotFound {
+                entity_type: "backup".to_string(),
+                id: "latest".to_string(),
+            })
+    }
+
+    /// List all backup files for the current database, newest first.
+    pub fn list_backups(&self) -> KinforgeResult<Vec<BackupInfo>> {
+        let dir = backup_dir_for(&self.config);
+        scan_backup_dir(&dir)
+    }
 }

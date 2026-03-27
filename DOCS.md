@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-03-27
 > **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 0.9.0
+> **Version:** 1.0.0
 
 ---
 
@@ -460,6 +460,18 @@ kinforge reminders [--days <N>]     # default: 30 days ahead
 
 Shows upcoming birthdays (Birth events) and anniversaries (Marriage events).
 
+### `backup`
+
+```
+kinforge backup list
+kinforge backup create
+```
+
+`backup list` shows all backup files for the current database (newest first) with file name, size, and path.
+`backup create` immediately copies the database to the backups directory, respecting the `max_backups` rotation setting.
+
+Backups are stored in a `backups/` subdirectory next to the database file, named `<stem>_<timestamp>.db`.
+
 ### `check`
 
 ```
@@ -578,11 +590,14 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: Sources tab with citation detail panel
 - [x] TUI: task quick-complete (`d`/`c`), new task (`n`), priority cycle (`p`), delete (`x`)
 
-**Near-term:**
+**Near-term (v1.0.0 — complete):**
 - [x] JSON import statistics (people, events, sources, relationships, places counts)
 - [x] TUI: inline person creation (People tab, `n` key, two-field popup)
+- [x] `kinforge backup list/create` — manual backup management CLI
+- [x] TUI Stats tab: research task breakdown with progress bar
+- [x] `BackupInfo` API + `Application::backup_now()` / `list_backups()`
 
-**Long-term:**
+**Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)
 - [ ] Optional sync between devices (`kinforge_sync`)
 - [ ] Plugin loading at runtime (`kinforge_plugin_api`)

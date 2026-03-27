@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod check;
 pub mod citation;
 pub mod config;

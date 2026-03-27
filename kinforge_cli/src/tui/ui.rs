@@ -543,6 +543,48 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
         }
     }
 
+    // ── Research tasks breakdown ─────────────────────────────────────────────
+    let total_tasks = state.tasks_pending + state.tasks_in_progress + state.tasks_done;
+    if total_tasks > 0 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "    Research Tasks",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+
+        let task_rows: [(&str, usize, Color); 3] = [
+            ("In Progress", state.tasks_in_progress, Color::Yellow),
+            ("Pending", state.tasks_pending, Color::White),
+            ("Done", state.tasks_done, Color::Green),
+        ];
+        for (label, count, color) in &task_rows {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("      {:<14}", label),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    count.to_string(),
+                    Style::default().fg(*color).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
+
+        // Progress bar: done / total
+        let pct = (state.tasks_done * 100) / total_tasks.max(1);
+        let bar_width = 20usize;
+        let filled = (bar_width * state.tasks_done) / total_tasks.max(1);
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+        lines.push(Line::from(vec![
+            Span::styled("      Progress      ", Style::default().fg(Color::DarkGray)),
+            Span::styled(bar, Style::default().fg(Color::Green)),
+            Span::styled(
+                format!("  {}%", pct),
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 mod commands;
 mod tui;
 use commands::{
-    citation::CitationCommands, config::ConfigCommands, event::EventCommands,
+    backup::BackupCommands, citation::CitationCommands, config::ConfigCommands, event::EventCommands,
     export::ExportCommands, import::ImportCommands, media::MediaCommands,
     person::PersonCommands, place::PlaceCommands, relationship::RelationshipCommands,
     report::ReportCommands, search::SearchCommands, source::SourceCommands,
@@ -107,6 +107,10 @@ enum Commands {
 
     /// Run data integrity checks and report issues
     Check,
+
+    /// Manage database backups
+    #[command(subcommand)]
+    Backup(BackupCommands),
 }
 
 fn main() -> Result<()> {
@@ -147,6 +151,7 @@ fn main() -> Result<()> {
         Commands::Task(cmd) => commands::task::handle(cmd, &app)?,
         Commands::Reminders { days } => commands::reminders::handle(days, &app)?,
         Commands::Check => commands::check::handle(&app)?,
+        Commands::Backup(cmd) => commands::backup::handle(cmd, &app)?,
         Commands::Config(_) => unreachable!(),
     }
 

@@ -108,6 +108,11 @@ pub struct TuiState {
     pub stats: Option<DatabaseStats>,
     pub db_path: String,
 
+    // Task summary counts (kept in sync with tasks vec)
+    pub tasks_pending: usize,
+    pub tasks_in_progress: usize,
+    pub tasks_done: usize,
+
     // Global
     pub mode: InputMode,
     pub should_quit: bool,
@@ -152,6 +157,9 @@ impl TuiState {
         let tasks = app.list_tasks().unwrap_or_default();
         let task_rows = build_task_rows(&tasks);
         let first_task = first_task_item_idx(&task_rows);
+        let tasks_pending = tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
+        let tasks_in_progress = tasks.iter().filter(|t| t.status == TaskStatus::InProgress).count();
+        let tasks_done = tasks.iter().filter(|t| t.status == TaskStatus::Done).count();
 
         // Load sources with citation counts
         let sources = load_sources(app);
@@ -182,6 +190,9 @@ impl TuiState {
             source_detail_scroll: 0,
             stats,
             db_path,
+            tasks_pending,
+            tasks_in_progress,
+            tasks_done,
             mode: InputMode::Normal,
             should_quit: false,
             task_create_buf: String::new(),
@@ -218,6 +229,9 @@ impl TuiState {
     pub fn reload_tasks(&mut self, app: &Application) {
         self.tasks = app.list_tasks().unwrap_or_default();
         self.task_rows = build_task_rows(&self.tasks);
+        self.tasks_pending = self.tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
+        self.tasks_in_progress = self.tasks.iter().filter(|t| t.status == TaskStatus::InProgress).count();
+        self.tasks_done = self.tasks.iter().filter(|t| t.status == TaskStatus::Done).count();
         // Clamp cursor
         let max_item = self
             .task_rows
