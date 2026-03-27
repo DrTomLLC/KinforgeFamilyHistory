@@ -45,6 +45,7 @@ impl Tab {
 pub enum InputMode {
     Normal,
     Search,
+    TaskCreate,
 }
 
 // ── Row types ─────────────────────────────────────────────────────────────────
@@ -109,6 +110,9 @@ pub struct TuiState {
     // Global
     pub mode: InputMode,
     pub should_quit: bool,
+
+    // Inline task creation
+    pub task_create_buf: String,
 }
 
 impl TuiState {
@@ -174,6 +178,7 @@ impl TuiState {
             db_path,
             mode: InputMode::Normal,
             should_quit: false,
+            task_create_buf: String::new(),
         })
     }
 

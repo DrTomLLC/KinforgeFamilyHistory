@@ -9,7 +9,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use kinforge_app::Application;
-use kinforge_core::models::RelationshipType;
+use kinforge_core::models::{RelationshipType, TaskPriority};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, time::Duration};
 
@@ -63,6 +63,29 @@ fn run(
 
                     events::Action::CompleteTask(tid) => {
                         let _ = app.complete_task(&tid);
+                        state.reload_tasks(app);
+                    }
+
+                    events::Action::CreateTask(desc) => {
+                        let _ = app.add_task(&desc, None, TaskPriority::Medium, None);
+                        state.reload_tasks(app);
+                    }
+
+                    events::Action::CycleTaskPriority(tid) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.priority = match task.priority {
+                                TaskPriority::Low => TaskPriority::Medium,
+                                TaskPriority::Medium => TaskPriority::High,
+                                TaskPriority::High => TaskPriority::Low,
+                            };
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
+                    }
+
+                    events::Action::DeleteTask(tid) => {
+                        let _ = app.delete_task(&tid);
                         state.reload_tasks(app);
                     }
 

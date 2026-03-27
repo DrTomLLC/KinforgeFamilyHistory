@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Frame,
 };
 
@@ -297,6 +297,34 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
         .highlight_symbol("» ");
 
     frame.render_stateful_widget(list, area, &mut list_state);
+
+    // Render task-create popup on top when active
+    if state.mode == InputMode::TaskCreate {
+        draw_task_create_popup(frame, state, area);
+    }
+}
+
+fn draw_task_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 56_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 1;
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: 3,
+    };
+
+    let input_display = format!("{}_", state.task_create_buf);
+    let para = Paragraph::new(Line::from(Span::raw(input_display))).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" New Task — Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
 }
 
 // ── Sources tab ───────────────────────────────────────────────────────────────
@@ -488,6 +516,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
             " ESC: cancel  Backspace: delete  [{} match(es)]",
             state.filtered_people.len()
         ),
+        InputMode::TaskCreate => " Type task description  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
@@ -497,7 +526,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
                         .to_string()
                 }
             }
-            Tab::Tasks => " Tab: next tab  ↑↓/jk: navigate  d/c: mark done  q: quit".to_string(),
+            Tab::Tasks => " Tab: next tab  ↑↓/jk: navigate  n: new  d/c: done  p: priority  x: delete  q: quit".to_string(),
             Tab::Sources => {
                 if state.source_detail_open {
                     " ESC/Enter: close panel  ↑↓/jk: scroll  Tab: next tab  q: quit".to_string()

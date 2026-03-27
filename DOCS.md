@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-03-27
 > **Build status:** 90 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 0.6.0
+> **Version:** 0.8.0
 
 ---
 
@@ -482,24 +482,29 @@ kinforge config set <KEY> <VALUE>
 kinforge tui
 ```
 
-Opens an interactive terminal UI with three tabs:
+Opens an interactive terminal UI with four tabs:
 
 | Tab | Content |
 |-----|---------|
 | **People** | Scrollable list with birth years; `/` to filter by name; `Enter` for detail panel showing events and relationships |
-| **Tasks** | Scrollable list grouped by status (In Progress → Pending → Done); shows priority badge |
+| **Tasks** | Scrollable list grouped by status (In Progress → Pending → Done); shows priority badge and strikethrough for done tasks |
+| **Sources** | Scrollable list with citation counts; `Enter` for citation detail panel showing linked events |
 | **Stats** | Database record counts and database file path |
 
 **Key bindings:**
 
-| Key | Effect |
-|-----|--------|
-| `Tab` / `Shift-Tab` | Switch tabs |
-| `↑` / `↓` or `k` / `j` | Navigate list |
-| `/` | Enter search mode (People tab) |
-| `Esc` | Cancel search / close detail panel |
-| `Enter` | Open person detail panel (People tab) |
-| `q` or `Ctrl+C` | Quit |
+| Key | Context | Effect |
+|-----|---------|--------|
+| `Tab` / `Shift-Tab` | Any | Switch tabs |
+| `↑` / `↓` or `k` / `j` | Any | Navigate list or scroll detail panel |
+| `/` | People | Enter search/filter mode |
+| `Esc` | Search / detail panel | Cancel search or close detail panel |
+| `Enter` | People, Sources | Open detail panel; close if already open |
+| `d` / `c` | Tasks | Mark selected task as Done |
+| `n` | Tasks | Open inline input to create a new task |
+| `p` | Tasks | Cycle selected task's priority (Low → Medium → High → Low) |
+| `x` | Tasks | Delete selected task |
+| `q` or `Ctrl+C` | Any | Quit |
 
 ---
 
@@ -560,20 +565,21 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 | Desktop GUI | `kinforge_ui_desktop` stub only; no UI framework chosen |
 | Cloud/peer sync | `kinforge_sync` stub only |
 | Plugin loading | Trait defined; no loader or host |
-| In-place name editing | Delete and re-add name entries as workaround |
+| In-place name editing | `person update-name` / `person delete-name` commands available |
 
 ---
 
 ## Roadmap
 
-**Near-term:**
-- [ ] `kinforge person update-name` — edit a specific name entry in place
-- [ ] Batch import deduplication report (CSV diff before/after)
+**Completed (recent):**
+- [x] `kinforge person update-name` / `delete-name` — edit name entries in place
+- [x] `kinforge_app::db` fully private — all access via `Application::database()` accessor
+- [x] TUI: Sources tab with citation detail panel
+- [x] TUI: task quick-complete (`d`/`c`), new task (`n`), priority cycle (`p`), delete (`x`)
 
-**Medium-term:**
-- [ ] `kinforge_app::db` made fully private (all access through Application methods only)
-- [ ] TUI: inline task creation and completion
-- [ ] TUI: source and citation browser tabs
+**Near-term:**
+- [ ] Batch import deduplication report (CSV diff before/after)
+- [ ] TUI: person add/edit form (inline popup, similar to task creation)
 
 **Long-term:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

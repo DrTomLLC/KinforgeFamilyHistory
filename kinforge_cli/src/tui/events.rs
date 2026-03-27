@@ -9,6 +9,9 @@ pub enum Action {
     OpenPersonDetail(PersonId),
     OpenSourceDetail(SourceId),
     CompleteTask(TaskId),
+    CreateTask(String),
+    CycleTaskPriority(TaskId),
+    DeleteTask(TaskId),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -25,6 +28,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
     match state.mode {
         InputMode::Normal => handle_normal(state, key),
         InputMode::Search => handle_search(state, key),
+        InputMode::TaskCreate => handle_task_create(state, key),
     }
 }
 
@@ -141,6 +145,31 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // New task: press 'n' in Tasks tab
+        KeyCode::Char('n') if state.active_tab == Tab::Tasks => {
+            state.task_create_buf.clear();
+            state.mode = InputMode::TaskCreate;
+            Action::None
+        }
+
+        // Cycle task priority: press 'p' on a task
+        KeyCode::Char('p') if state.active_tab == Tab::Tasks => {
+            if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+                let task = &state.tasks[*idx];
+                return Action::CycleTaskPriority(task.id.clone());
+            }
+            Action::None
+        }
+
+        // Delete task: press 'x' on a task
+        KeyCode::Char('x') if state.active_tab == Tab::Tasks => {
+            if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+                let task = &state.tasks[*idx];
+                return Action::DeleteTask(task.id.clone());
+            }
+            Action::None
+        }
+
         KeyCode::Esc => {
             if state.detail_open {
                 state.detail_open = false;
@@ -189,6 +218,29 @@ fn handle_search(state: &mut TuiState, key: KeyEvent) -> Action {
         KeyCode::Char(c) => {
             state.search_query.push(c);
             state.recompute_filter();
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_task_create(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Enter => {
+            let desc = state.task_create_buf.trim().to_string();
+            state.mode = InputMode::Normal;
+            if !desc.is_empty() {
+                return Action::CreateTask(desc);
+            }
+        }
+        KeyCode::Backspace => {
+            state.task_create_buf.pop();
+        }
+        KeyCode::Char(c) => {
+            state.task_create_buf.push(c);
         }
         _ => {}
     }
