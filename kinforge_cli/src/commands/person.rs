@@ -210,7 +210,7 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
 
         PersonCommands::Show { id } => {
             let pid = app.resolve_person_id(&id)?;
-            let report = individual_report(&app.db, &pid)?;
+            let report = individual_report(app.database(), &pid)?;
             print!("{}", report);
         }
 

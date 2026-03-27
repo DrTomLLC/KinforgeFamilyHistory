@@ -92,7 +92,7 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             if let Some(s) = sex {
                 q = q.sex(s.parse()?);
             }
-            let results = q.run(&app.db)?;
+            let results = q.run(app.database())?;
             if results.is_empty() {
                 println!("{}", "No matching people.".bright_black());
             } else {
@@ -133,7 +133,7 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             if let (Some(f), Some(t)) = (from_year, to_year) {
                 q = q.year_range(f, t);
             }
-            let results = q.run(&app.db)?;
+            let results = q.run(app.database())?;
             if results.is_empty() {
                 println!("{}", "No matching sources.".bright_black());
             } else {
@@ -225,7 +225,7 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             if let Some(t) = to_year {
                 q = q.to_year(t);
             }
-            let events = q.run(&app.db)?;
+            let events = q.run(app.database())?;
             if events.is_empty() {
                 println!("{}", "No matching events.".bright_black());
             } else {

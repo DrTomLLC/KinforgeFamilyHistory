@@ -42,7 +42,7 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
         ExportCommands::Gedcom { output } => {
             let file = File::create(&output)?;
             let mut writer = BufWriter::new(file);
-            export_gedcom(&app.db, &mut writer)?;
+            export_gedcom(app.database(), &mut writer)?;
             println!(
                 "{} {}",
                 "Exported GEDCOM \u{2192}".green().bold(),
@@ -52,7 +52,7 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
         ExportCommands::Json { output } => {
             let file = File::create(&output)?;
             let mut writer = BufWriter::new(file);
-            export_json(&app.db, &mut writer)?;
+            export_json(app.database(), &mut writer)?;
             println!(
                 "{} {}",
                 "Exported JSON \u{2192}".green().bold(),
@@ -133,7 +133,7 @@ pub fn handle(cmd: ExportCommands, app: &Application) -> Result<()> {
         }
 
         ExportCommands::Html { output } => {
-            let html = html_export(&app.db)?;
+            let html = html_export(app.database())?;
             std::fs::write(&output, &html)?;
             let people = app.list_people()?;
             println!(

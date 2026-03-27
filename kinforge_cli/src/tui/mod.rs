@@ -11,7 +11,6 @@ use crossterm::{
 use kinforge_app::Application;
 use kinforge_core::models::RelationshipType;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use state::InputMode;
 use std::{io, time::Duration};
 
 pub fn handle(app: &Application) -> Result<()> {
@@ -44,16 +43,29 @@ fn run(
             if let Event::Key(key) = event::read()? {
                 match events::handle_key(&mut state, key) {
                     events::Action::Quit => break,
-                    events::Action::OpenDetail(pid) => {
+
+                    events::Action::OpenPersonDetail(pid) => {
                         state.detail_events =
                             app.list_events_for_person(&pid).unwrap_or_default();
                         state.detail_rel_rows =
-                            build_rel_rows(app, &pid, &state.people);
+                            build_person_rel_rows(app, &pid, &state.people);
                         state.detail_person_id = Some(pid);
                         state.detail_open = true;
                         state.detail_scroll = 0;
-                        state.mode = InputMode::Detail;
                     }
+
+                    events::Action::OpenSourceDetail(sid) => {
+                        state.source_detail_citations =
+                            build_source_citation_rows(app, &sid);
+                        state.source_detail_open = true;
+                        state.source_detail_scroll = 0;
+                    }
+
+                    events::Action::CompleteTask(tid) => {
+                        let _ = app.complete_task(&tid);
+                        state.reload_tasks(app);
+                    }
+
                     events::Action::None => {}
                 }
             }
@@ -67,7 +79,7 @@ fn run(
     Ok(())
 }
 
-fn build_rel_rows(
+fn build_person_rel_rows(
     app: &Application,
     focused_pid: &kinforge_core::models::PersonId,
     people_cache: &[state::PersonRow],
@@ -85,7 +97,6 @@ fn build_rel_rows(
                 &rel.person1_id
             };
 
-            // Look up name from cached list; fall back to UUID prefix
             let other_name = people_cache
                 .iter()
                 .find(|p| &p.id == other_id)
@@ -109,6 +120,35 @@ fn build_rel_rows(
             };
 
             (label.to_string(), other_name)
+        })
+        .collect()
+}
+
+fn build_source_citation_rows(
+    app: &Application,
+    source_id: &kinforge_core::models::SourceId,
+) -> Vec<(String, String)> {
+    let citations = app
+        .list_citations_for_source(source_id)
+        .unwrap_or_default();
+
+    citations
+        .into_iter()
+        .map(|cit| {
+            // Build a human label for the cited event
+            let event_label = app
+                .get_event(&cit.event_id)
+                .map(|e| {
+                    let person_name = app
+                        .get_person(&e.person_id)
+                        .map(|p| p.display_name())
+                        .unwrap_or_else(|_| "?".to_string());
+                    format!("{} — {}", person_name, e.event_type)
+                })
+                .unwrap_or_else(|_| cit.event_id.to_string());
+
+            let page_str = cit.page.unwrap_or_default();
+            (event_label, page_str)
         })
         .collect()
 }

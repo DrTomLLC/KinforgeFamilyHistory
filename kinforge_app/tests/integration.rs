@@ -42,7 +42,7 @@ fn delete_person_cascades_events() {
         .unwrap();
     a.delete_person(&p.id).unwrap();
     assert!(a.get_person(&p.id).is_err());
-    assert!(a.db.get_event(&e.id).is_err());
+    assert!(a.database().get_event(&e.id).is_err());
 }
 
 #[test]
@@ -75,12 +75,12 @@ fn add_event_with_date_and_place() {
             None,
         )
         .unwrap();
-    let fetched = a.db.get_event(&e.id).unwrap();
+    let fetched = a.database().get_event(&e.id).unwrap();
     match &fetched.date {
         Some(EventDate::Exact(d)) => assert_eq!(*d, NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()),
         _ => panic!("wrong date kind"),
     }
-    let place = a.db.get_place(fetched.place_id.as_ref().unwrap()).unwrap();
+    let place = a.database().get_place(fetched.place_id.as_ref().unwrap()).unwrap();
     assert_eq!(place.name, "Boston, MA");
 }
 
@@ -93,7 +93,7 @@ fn update_event() {
         .unwrap();
     e.notes = Some("Moved to Ohio".to_string());
     a.update_event(e.clone()).unwrap();
-    let fetched = a.db.get_event(&e.id).unwrap();
+    let fetched = a.database().get_event(&e.id).unwrap();
     assert_eq!(fetched.notes, Some("Moved to Ohio".to_string()));
 }
 
@@ -105,7 +105,7 @@ fn delete_event() {
         .add_event(p.id.clone(), EventType::Census, None, None, None)
         .unwrap();
     a.delete_event(&e.id).unwrap();
-    assert!(a.db.get_event(&e.id).is_err());
+    assert!(a.database().get_event(&e.id).is_err());
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn delete_relationship() {
         .add_relationship(RelationshipType::Spouse, p1.id.clone(), p2.id.clone(), None)
         .unwrap();
     a.delete_relationship(&rel.id).unwrap();
-    assert!(a.db.get_relationship(&rel.id).is_err());
+    assert!(a.database().get_relationship(&rel.id).is_err());
 }
 
 // ── Source and Citation ───────────────────────────────────────────────────────
@@ -253,10 +253,10 @@ fn citation_update_and_delete() {
         .unwrap();
     cit.page = Some("vol.3 p.99".to_string());
     a.update_citation(cit.clone()).unwrap();
-    let fetched = a.db.get_citation(&cit.id).unwrap();
+    let fetched = a.database().get_citation(&cit.id).unwrap();
     assert_eq!(fetched.page, Some("vol.3 p.99".to_string()));
     a.delete_citation(&cit.id).unwrap();
-    assert!(a.db.get_citation(&cit.id).is_err());
+    assert!(a.database().get_citation(&cit.id).is_err());
 }
 
 // ── Place CRUD ────────────────────────────────────────────────────────────────
@@ -267,14 +267,14 @@ fn place_crud() {
     let pl = a
         .add_place("London, England", Some(51.5074), Some(-0.1278), None)
         .unwrap();
-    let mut fetched = a.db.get_place(&pl.id).unwrap();
+    let mut fetched = a.database().get_place(&pl.id).unwrap();
     assert_eq!(fetched.name, "London, England");
     fetched.name = "London, UK".to_string();
     a.update_place(fetched.clone()).unwrap();
-    let updated = a.db.get_place(&pl.id).unwrap();
+    let updated = a.database().get_place(&pl.id).unwrap();
     assert_eq!(updated.name, "London, UK");
     a.delete_place(&pl.id).unwrap();
-    assert!(a.db.get_place(&pl.id).is_err());
+    assert!(a.database().get_place(&pl.id).is_err());
 }
 
 #[test]
@@ -739,7 +739,7 @@ fn event_query_year_range() {
     let results = EventQuery::new()
         .from_year(1850)
         .to_year(1880)
-        .run(&a.db)
+        .run(&a.database())
         .unwrap();
     // Only the 1870 death event should be in 1850–1880
     assert_eq!(results.len(), 1);
@@ -768,7 +768,7 @@ fn sources_report_renders() {
     .unwrap();
     let _ = s2; // deliberately uncited
 
-    let report = sources_report(&a.db).unwrap();
+    let report = sources_report(&a.database()).unwrap();
     assert!(report.contains("Used Source"));
     assert!(report.contains("Orphan Source"));
     assert!(report.contains("1 citation") || report.contains("1")); // cited count
@@ -887,7 +887,7 @@ fn narrative_report_renders() {
         None,
     ).unwrap();
 
-    let report = narrative_report(&a.db, &p.id).unwrap();
+    let report = narrative_report(&a.database(), &p.id).unwrap();
     assert!(report.contains("Thomas Edison"));
     assert!(report.contains("born") || report.contains("Birth"));
     assert!(report.contains("died") || report.contains("Death"));
@@ -1014,7 +1014,7 @@ fn html_export_renders() {
     )
     .unwrap();
 
-    let html = html_export(&a.db).unwrap();
+    let html = html_export(&a.database()).unwrap();
     assert!(html.contains("<!DOCTYPE html>"));
     assert!(html.contains("Thomas Hardy"));
     assert!(html.contains("1840"));

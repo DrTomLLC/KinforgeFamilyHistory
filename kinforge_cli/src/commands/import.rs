@@ -24,7 +24,7 @@ pub fn handle(cmd: ImportCommands, app: &Application) -> Result<()> {
     match cmd {
         ImportCommands::Gedcom { input } => {
             let content = std::fs::read_to_string(&input)?;
-            let stats = import_gedcom(&content, &app.db)?;
+            let stats = import_gedcom(&content, app.database())?;
             println!(
                 "{} {} {} {}, {}, {}",
                 "Imported GEDCOM from".green().bold(),
@@ -45,7 +45,7 @@ pub fn handle(cmd: ImportCommands, app: &Application) -> Result<()> {
         ImportCommands::Json { input } => {
             let file = File::open(&input)?;
             let mut reader = BufReader::new(file);
-            import_json(&app.db, &mut reader)?;
+            import_json(app.database(), &mut reader)?;
             println!(
                 "{} {}",
                 "Imported JSON from".green().bold(),

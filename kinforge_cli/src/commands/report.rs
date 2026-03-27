@@ -149,42 +149,42 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
             }
         }
         ReportCommands::People => {
-            print!("{}", people_list_report(&app.db)?);
+            print!("{}", people_list_report(app.database())?);
         }
         ReportCommands::Individual { id } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", individual_report(&app.db, &pid)?);
+            print!("{}", individual_report(app.database(), &pid)?);
         }
         ReportCommands::Ancestors { id, generations } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", ancestor_report(&app.db, &pid, generations)?);
+            print!("{}", ancestor_report(app.database(), &pid, generations)?);
         }
         ReportCommands::Descendants { id, generations } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", descendant_report(&app.db, &pid, generations)?);
+            print!("{}", descendant_report(app.database(), &pid, generations)?);
         }
         ReportCommands::Tree { id, depth } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", ascii_family_tree(&app.db, &pid, depth)?);
+            print!("{}", ascii_family_tree(app.database(), &pid, depth)?);
         }
         ReportCommands::Family { id } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", family_group_sheet(&app.db, &pid)?);
+            print!("{}", family_group_sheet(app.database(), &pid)?);
         }
         ReportCommands::Timeline { id } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", timeline_report(&app.db, &pid)?);
+            print!("{}", timeline_report(app.database(), &pid)?);
         }
         ReportCommands::AncestorTree { id, depth } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", ascii_ancestor_tree(&app.db, &pid, depth)?);
+            print!("{}", ascii_ancestor_tree(app.database(), &pid, depth)?);
         }
         ReportCommands::Sources => {
-            print!("{}", sources_report(&app.db)?);
+            print!("{}", sources_report(app.database())?);
         }
         ReportCommands::Narrative { id } => {
             let pid = app.resolve_person_id(&id)?;
-            print!("{}", narrative_report(&app.db, &pid)?);
+            print!("{}", narrative_report(app.database(), &pid)?);
         }
     }
     Ok(())

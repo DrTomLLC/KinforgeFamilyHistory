@@ -27,8 +27,18 @@ pub struct NotesMatch {
 }
 
 pub struct Application {
-    pub db: Database,
+    db: Database,
     pub config: Config,
+}
+
+impl Application {
+    /// Read-only access to the underlying database.
+    ///
+    /// Prefer using Application methods directly. This accessor exists for
+    /// report and import/export functions that operate at the storage layer.
+    pub fn database(&self) -> &Database {
+        &self.db
+    }
 }
 
 impl Application {
@@ -629,6 +639,22 @@ impl Application {
 
     pub fn list_places(&self) -> KinforgeResult<Vec<Place>> {
         self.db.list_places()
+    }
+
+    /// Find a place by exact name (case-insensitive) or create it if absent.
+    pub fn find_or_create_place(&self, name: &str) -> KinforgeResult<PlaceId> {
+        let lower = name.to_lowercase();
+        if let Some(existing) = self
+            .db
+            .list_places()?
+            .into_iter()
+            .find(|p| p.name.to_lowercase() == lower)
+        {
+            return Ok(existing.id);
+        }
+        let place = Place::new(name);
+        self.db.insert_place(&place)?;
+        Ok(place.id)
     }
 
     // ── Relationships ──────────────────────────────────────────────────────

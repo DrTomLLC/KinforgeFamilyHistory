@@ -26,6 +26,7 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
     match state.active_tab {
         Tab::People => draw_people(frame, state, chunks[1]),
         Tab::Tasks => draw_tasks(frame, state, chunks[1]),
+        Tab::Sources => draw_sources(frame, state, chunks[1]),
         Tab::Stats => draw_stats(frame, state, chunks[1]),
     }
 
@@ -36,11 +37,9 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
 
 fn draw_tab_bar(frame: &mut Frame, state: &TuiState, area: Rect) {
     let labels = vec![
-        Line::from(format!(
-            "  People ({})  ",
-            state.filtered_people.len()
-        )),
+        Line::from(format!("  People ({})  ", state.filtered_people.len())),
         Line::from(format!("  Tasks ({})  ", state.tasks.len())),
+        Line::from(format!("  Sources ({})  ", state.sources.len())),
         Line::from("  Stats  "),
     ];
 
@@ -141,7 +140,6 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // Events section
     lines.push(Line::from(Span::styled(
         " Events",
         Style::default()
@@ -149,7 +147,7 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
-        " ─────────────────────────────────",
+        " ────────────────────────────────",
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -176,8 +174,6 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
     }
 
     lines.push(Line::from(""));
-
-    // Relationships section
     lines.push(Line::from(Span::styled(
         " Relationships",
         Style::default()
@@ -185,7 +181,7 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
-        " ─────────────────────────────────",
+        " ────────────────────────────────",
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -263,7 +259,14 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
                     }
                 };
 
-                let desc = Span::raw(truncate(&task.description, 58));
+                let desc_style = if task.status == TaskStatus::Done {
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::CROSSED_OUT)
+                } else {
+                    Style::default()
+                };
+                let desc = Span::styled(truncate(&task.description, 56), desc_style);
                 ListItem::new(Line::from(vec![status_span, prio_span, desc]))
             }
         })
@@ -274,11 +277,17 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
         list_state.select(Some(state.tasks_selected));
     }
 
+    let hint = if state.tasks.is_empty() {
+        String::new()
+    } else {
+        "  d/c: mark done".to_string()
+    };
+
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Research Tasks ({}) ", state.tasks.len())),
+                .title(format!(" Research Tasks ({}){} ", state.tasks.len(), hint)),
         )
         .highlight_style(
             Style::default()
@@ -288,6 +297,131 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
         .highlight_symbol("» ");
 
     frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+// ── Sources tab ───────────────────────────────────────────────────────────────
+
+fn draw_sources(frame: &mut Frame, state: &TuiState, area: Rect) {
+    if state.source_detail_open {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(area);
+        draw_sources_list(frame, state, chunks[0]);
+        draw_source_detail(frame, state, chunks[1]);
+    } else {
+        draw_sources_list(frame, state, area);
+    }
+}
+
+fn draw_sources_list(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let items: Vec<ListItem> = state
+        .sources
+        .iter()
+        .map(|s| {
+            let year_str = s
+                .year
+                .map(|y| format!(" {}", y))
+                .unwrap_or_default();
+            let cit_str = if s.citation_count > 0 {
+                format!(" [{} cit]", s.citation_count)
+            } else {
+                String::new()
+            };
+            let line = Line::from(vec![
+                Span::raw(truncate(&s.title, 32)),
+                Span::styled(year_str, Style::default().fg(Color::Yellow)),
+                Span::styled(cit_str, Style::default().fg(Color::DarkGray)),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let mut list_state = ListState::default();
+    if !state.sources.is_empty() {
+        list_state.select(Some(state.sources_selected));
+    }
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" Sources ({}) ", state.sources.len())),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("» ");
+
+    frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn draw_source_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let source = state.selected_source();
+    let title = source
+        .map(|s| s.title.as_str())
+        .unwrap_or("—");
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(s) = source {
+        if let Some(ref author) = s.author {
+            lines.push(Line::from(vec![
+                Span::styled("  Author  ", Style::default().fg(Color::Cyan)),
+                Span::raw(author.as_str()),
+            ]));
+        }
+        if let Some(year) = s.year {
+            lines.push(Line::from(vec![
+                Span::styled("  Year    ", Style::default().fg(Color::Cyan)),
+                Span::styled(year.to_string(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(Span::styled(
+        " Citations",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        " ────────────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    if state.source_detail_citations.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (no citations)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for (event_label, page) in &state.source_detail_citations {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<24}", truncate(event_label, 24)),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(page.as_str(), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
+    let scroll = state.source_detail_scroll as u16;
+
+    let para = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" {} ", truncate(title, 38))),
+        )
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(para, area);
 }
 
 // ── Stats tab ─────────────────────────────────────────────────────────────────
@@ -337,12 +471,11 @@ fn draw_stats(frame: &mut Frame, state: &TuiState, area: Rect) {
         Span::styled(&state.db_path, Style::default().fg(Color::DarkGray)),
     ]));
 
-    let para = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Database Statistics "),
-        );
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Database Statistics "),
+    );
 
     frame.render_widget(para, area);
 }
@@ -355,13 +488,23 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
             " ESC: cancel  Backspace: delete  [{} match(es)]",
             state.filtered_people.len()
         ),
-        InputMode::Detail => " ESC: close panel  ↑↓/jk: scroll  q: quit".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
-                " Tab: next tab  ↑↓/jk: navigate  /: search  Enter: detail  q: quit"
-                    .to_string()
+                if state.detail_open {
+                    " ESC/Enter: close panel  ↑↓/jk: scroll  /: search  Tab: next tab  q: quit".to_string()
+                } else {
+                    " Tab: next tab  ↑↓/jk: navigate  /: search  Enter: detail  q: quit"
+                        .to_string()
+                }
             }
-            Tab::Tasks => " Tab: next tab  ↑↓/jk: navigate  q: quit".to_string(),
+            Tab::Tasks => " Tab: next tab  ↑↓/jk: navigate  d/c: mark done  q: quit".to_string(),
+            Tab::Sources => {
+                if state.source_detail_open {
+                    " ESC/Enter: close panel  ↑↓/jk: scroll  Tab: next tab  q: quit".to_string()
+                } else {
+                    " Tab: next tab  ↑↓/jk: navigate  Enter: citations  q: quit".to_string()
+                }
+            }
             Tab::Stats => " Tab: next tab  q: quit".to_string(),
         },
     };

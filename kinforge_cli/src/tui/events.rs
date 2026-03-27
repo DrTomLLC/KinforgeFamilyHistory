@@ -1,16 +1,18 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use kinforge_core::models::PersonId;
+use kinforge_core::models::{PersonId, SourceId, TaskId};
 
 use super::state::{InputMode, Tab, TaskRow, TuiState};
 
 pub enum Action {
     None,
     Quit,
-    OpenDetail(PersonId),
+    OpenPersonDetail(PersonId),
+    OpenSourceDetail(SourceId),
+    CompleteTask(TaskId),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
-    // Only react to key-press events (not release/repeat on some platforms)
+    // Only react to key-press events
     if key.kind != KeyEventKind::Press {
         return Action::None;
     }
@@ -23,7 +25,6 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
     match state.mode {
         InputMode::Normal => handle_normal(state, key),
         InputMode::Search => handle_search(state, key),
-        InputMode::Detail => handle_detail(state, key),
     }
 }
 
@@ -33,21 +34,36 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
 
         KeyCode::Tab => {
             state.active_tab = state.active_tab.next();
+            // Close open detail panels when switching tabs
+            state.detail_open = false;
+            state.source_detail_open = false;
             Action::None
         }
         KeyCode::BackTab => {
             state.active_tab = state.active_tab.prev();
+            state.detail_open = false;
+            state.source_detail_open = false;
             Action::None
         }
 
         KeyCode::Up | KeyCode::Char('k') => {
             match state.active_tab {
                 Tab::People => {
-                    if state.people_selected > 0 {
+                    if state.detail_open {
+                        state.detail_scroll = state.detail_scroll.saturating_sub(1);
+                    } else if state.people_selected > 0 {
                         state.people_selected -= 1;
                     }
                 }
                 Tab::Tasks => move_task_up(state),
+                Tab::Sources => {
+                    if state.source_detail_open {
+                        state.source_detail_scroll =
+                            state.source_detail_scroll.saturating_sub(1);
+                    } else if state.sources_selected > 0 {
+                        state.sources_selected -= 1;
+                    }
+                }
                 Tab::Stats => {}
             }
             Action::None
@@ -55,34 +71,84 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
         KeyCode::Down | KeyCode::Char('j') => {
             match state.active_tab {
                 Tab::People => {
-                    let max = state.filtered_people.len().saturating_sub(1);
-                    if state.people_selected < max {
-                        state.people_selected += 1;
+                    if state.detail_open {
+                        state.detail_scroll = state.detail_scroll.saturating_add(1);
+                    } else {
+                        let max = state.filtered_people.len().saturating_sub(1);
+                        if state.people_selected < max {
+                            state.people_selected += 1;
+                        }
                     }
                 }
                 Tab::Tasks => move_task_down(state),
+                Tab::Sources => {
+                    if state.source_detail_open {
+                        state.source_detail_scroll =
+                            state.source_detail_scroll.saturating_add(1);
+                    } else {
+                        let max = state.sources.len().saturating_sub(1);
+                        if state.sources_selected < max {
+                            state.sources_selected += 1;
+                        }
+                    }
+                }
                 Tab::Stats => {}
             }
             Action::None
         }
 
-        KeyCode::Char('/') if state.active_tab == Tab::People => {
+        KeyCode::Char('/') if state.active_tab == Tab::People && !state.detail_open => {
             state.search_active = true;
             state.mode = InputMode::Search;
             Action::None
         }
 
-        KeyCode::Enter if state.active_tab == Tab::People => {
-            if let Some(row) = state.selected_person() {
-                Action::OpenDetail(row.id.clone())
-            } else {
-                Action::None
+        KeyCode::Enter => match state.active_tab {
+            Tab::People => {
+                if state.detail_open {
+                    // Close detail on second Enter
+                    state.detail_open = false;
+                    state.detail_scroll = 0;
+                    Action::None
+                } else if let Some(row) = state.selected_person() {
+                    Action::OpenPersonDetail(row.id.clone())
+                } else {
+                    Action::None
+                }
             }
+            Tab::Sources => {
+                if state.source_detail_open {
+                    state.source_detail_open = false;
+                    state.source_detail_scroll = 0;
+                    Action::None
+                } else if let Some(row) = state.selected_source() {
+                    Action::OpenSourceDetail(row.id.clone())
+                } else {
+                    Action::None
+                }
+            }
+            _ => Action::None,
+        },
+
+        // Task quick-complete: press 'd' or 'c' on a task
+        KeyCode::Char('d') | KeyCode::Char('c') if state.active_tab == Tab::Tasks => {
+            if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+                let task = &state.tasks[*idx];
+                if task.status != kinforge_core::models::TaskStatus::Done {
+                    return Action::CompleteTask(task.id.clone());
+                }
+            }
+            Action::None
         }
 
-        KeyCode::Esc if state.detail_open => {
-            state.detail_open = false;
-            state.detail_scroll = 0;
+        KeyCode::Esc => {
+            if state.detail_open {
+                state.detail_open = false;
+                state.detail_scroll = 0;
+            } else if state.source_detail_open {
+                state.source_detail_open = false;
+                state.source_detail_scroll = 0;
+            }
             Action::None
         }
 
@@ -99,36 +165,30 @@ fn handle_search(state: &mut TuiState, key: KeyEvent) -> Action {
             state.recompute_filter();
         }
         KeyCode::Enter => {
-            // Confirm search — stay in Normal, keep filter active
             state.search_active = false;
             state.mode = InputMode::Normal;
+            if let Some(row) = state.selected_person() {
+                return Action::OpenPersonDetail(row.id.clone());
+            }
         }
         KeyCode::Backspace => {
             state.search_query.pop();
             state.recompute_filter();
         }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if state.people_selected > 0 {
+                state.people_selected -= 1;
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let max = state.filtered_people.len().saturating_sub(1);
+            if state.people_selected < max {
+                state.people_selected += 1;
+            }
+        }
         KeyCode::Char(c) => {
             state.search_query.push(c);
             state.recompute_filter();
-        }
-        _ => {}
-    }
-    Action::None
-}
-
-fn handle_detail(state: &mut TuiState, key: KeyEvent) -> Action {
-    match key.code {
-        KeyCode::Esc => {
-            state.detail_open = false;
-            state.mode = InputMode::Normal;
-            state.detail_scroll = 0;
-        }
-        KeyCode::Char('q') => return Action::Quit,
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.detail_scroll = state.detail_scroll.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.detail_scroll = state.detail_scroll.saturating_add(1);
         }
         _ => {}
     }

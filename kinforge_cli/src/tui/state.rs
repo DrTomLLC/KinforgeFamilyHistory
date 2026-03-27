@@ -8,6 +8,7 @@ use kinforge_storage::DatabaseStats;
 pub enum Tab {
     People,
     Tasks,
+    Sources,
     Stats,
 }
 
@@ -15,7 +16,8 @@ impl Tab {
     pub fn next(self) -> Self {
         match self {
             Tab::People => Tab::Tasks,
-            Tab::Tasks => Tab::Stats,
+            Tab::Tasks => Tab::Sources,
+            Tab::Sources => Tab::Stats,
             Tab::Stats => Tab::People,
         }
     }
@@ -23,14 +25,16 @@ impl Tab {
         match self {
             Tab::People => Tab::Stats,
             Tab::Tasks => Tab::People,
-            Tab::Stats => Tab::Tasks,
+            Tab::Sources => Tab::Tasks,
+            Tab::Stats => Tab::Sources,
         }
     }
     pub fn index(self) -> usize {
         match self {
             Tab::People => 0,
             Tab::Tasks => 1,
-            Tab::Stats => 2,
+            Tab::Sources => 2,
+            Tab::Stats => 3,
         }
     }
 }
@@ -41,7 +45,6 @@ impl Tab {
 pub enum InputMode {
     Normal,
     Search,
-    Detail,
 }
 
 // ── Row types ─────────────────────────────────────────────────────────────────
@@ -55,6 +58,14 @@ pub struct PersonRow {
 pub enum TaskRow {
     Header(String),
     Item(usize), // index into TuiState::tasks
+}
+
+pub struct SourceRow {
+    pub id: SourceId,
+    pub title: String,
+    pub author: Option<String>,
+    pub year: Option<i32>,
+    pub citation_count: usize,
 }
 
 // ── Main state ────────────────────────────────────────────────────────────────
@@ -83,6 +94,13 @@ pub struct TuiState {
     pub tasks: Vec<Task>,
     pub task_rows: Vec<TaskRow>,
     pub tasks_selected: usize,
+
+    // Sources list
+    pub sources: Vec<SourceRow>,
+    pub sources_selected: usize,
+    pub source_detail_open: bool,
+    pub source_detail_citations: Vec<(String, String)>, // (event label, page/notes)
+    pub source_detail_scroll: usize,
 
     // Stats
     pub stats: Option<DatabaseStats>,
@@ -125,6 +143,9 @@ impl TuiState {
         let task_rows = build_task_rows(&tasks);
         let first_task = first_task_item_idx(&task_rows);
 
+        // Load sources with citation counts
+        let sources = load_sources(app);
+
         // Stats
         let stats = app.stats().ok();
         let db_path = app.config.database_path.display().to_string();
@@ -144,6 +165,11 @@ impl TuiState {
             tasks,
             task_rows,
             tasks_selected: first_task,
+            sources,
+            sources_selected: 0,
+            source_detail_open: false,
+            source_detail_citations: vec![],
+            source_detail_scroll: 0,
             stats,
             db_path,
             mode: InputMode::Normal,
@@ -168,6 +194,29 @@ impl TuiState {
     pub fn selected_person(&self) -> Option<&PersonRow> {
         let idx = *self.filtered_people.get(self.people_selected)?;
         self.people.get(idx)
+    }
+
+    pub fn selected_source(&self) -> Option<&SourceRow> {
+        self.sources.get(self.sources_selected)
+    }
+
+    /// Reload tasks from the DB and rebuild the row list.
+    pub fn reload_tasks(&mut self, app: &Application) {
+        self.tasks = app.list_tasks().unwrap_or_default();
+        self.task_rows = build_task_rows(&self.tasks);
+        // Clamp cursor
+        let max_item = self
+            .task_rows
+            .iter()
+            .rposition(|r| matches!(r, TaskRow::Item(_)))
+            .unwrap_or(0);
+        if self.tasks_selected > max_item {
+            self.tasks_selected = max_item;
+        }
+        // Skip to next selectable row if on a header
+        if matches!(self.task_rows.get(self.tasks_selected), Some(TaskRow::Header(_))) {
+            self.tasks_selected = first_task_item_idx(&self.task_rows);
+        }
     }
 }
 
@@ -215,8 +264,27 @@ pub fn build_task_rows(tasks: &[Task]) -> Vec<TaskRow> {
     rows
 }
 
-fn first_task_item_idx(rows: &[TaskRow]) -> usize {
+pub fn first_task_item_idx(rows: &[TaskRow]) -> usize {
     rows.iter()
         .position(|r| matches!(r, TaskRow::Item(_)))
         .unwrap_or(0)
+}
+
+fn load_sources(app: &Application) -> Vec<SourceRow> {
+    let raw = app.list_sources().unwrap_or_default();
+    raw.into_iter()
+        .map(|s| {
+            let citation_count = app
+                .list_citations_for_source(&s.id)
+                .map(|v| v.len())
+                .unwrap_or(0);
+            SourceRow {
+                id: s.id,
+                title: s.title,
+                author: s.author,
+                year: s.year,
+                citation_count,
+            }
+        })
+        .collect()
 }
