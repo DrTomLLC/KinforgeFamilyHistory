@@ -5,6 +5,7 @@ use kinforge_config::Config;
 use std::path::PathBuf;
 
 mod commands;
+mod tui;
 use commands::{
     citation::CitationCommands, config::ConfigCommands, event::EventCommands,
     export::ExportCommands, import::ImportCommands, media::MediaCommands,
@@ -90,6 +91,9 @@ enum Commands {
     #[command(subcommand)]
     Config(ConfigCommands),
 
+    /// Interactive TUI browser (People, Tasks, Stats)
+    Tui,
+
     /// Manage research tasks
     #[command(subcommand)]
     Task(TaskCommands),
@@ -139,6 +143,7 @@ fn main() -> Result<()> {
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
         Commands::Media(cmd) => commands::media::handle(cmd, &app)?,
+        Commands::Tui => tui::handle(&app)?,
         Commands::Task(cmd) => commands::task::handle(cmd, &app)?,
         Commands::Reminders { days } => commands::reminders::handle(days, &app)?,
         Commands::Check => commands::check::handle(&app)?,

@@ -21,3 +21,5 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 colored = { workspace = true }
+ratatui = "0.28"
+crossterm = "0.27"
