@@ -427,3 +427,109 @@ fn get_citation_roundtrip() {
     assert_eq!(fetched.page, Some("p.42".to_string()));
     assert_eq!(fetched.confidence, ConfidenceLevel::Primary);
 }
+
+// ── Phase 2: name editing ─────────────────────────────────────────────────────
+
+#[test]
+fn update_name_on_person() {
+    let a = app();
+    let p = a
+        .add_person(Some("Old"), Some("Name"), Sex::Unknown, None)
+        .unwrap();
+    let updated = a
+        .update_name_on_person(
+            &p.id,
+            0,
+            Some(Some("New".to_string())),
+            Some(Some("Person".to_string())),
+            None,
+        )
+        .unwrap();
+    assert_eq!(updated.display_name(), "New Person");
+    let fetched = a.get_person(&p.id).unwrap();
+    assert_eq!(fetched.display_name(), "New Person");
+}
+
+#[test]
+fn update_name_out_of_bounds_errors() {
+    let a = app();
+    let p = a
+        .add_person(Some("Jane"), Some("Doe"), Sex::Female, None)
+        .unwrap();
+    assert!(a
+        .update_name_on_person(&p.id, 5, None, None, None)
+        .is_err());
+}
+
+#[test]
+fn delete_name_from_person() {
+    let a = app();
+    let p = a
+        .add_person(Some("John"), Some("Smith"), Sex::Male, None)
+        .unwrap();
+    // Add a second name so we can delete the first
+    let p = a
+        .add_name_to_person(&p.id, Some("Johnny"), Some("Smith"), NameType::Nickname)
+        .unwrap();
+    assert_eq!(p.names.len(), 2);
+    let after = a.delete_name_from_person(&p.id, 1).unwrap();
+    assert_eq!(after.names.len(), 1);
+    assert_eq!(after.names[0].given, Some("John".to_string()));
+}
+
+#[test]
+fn delete_only_name_errors() {
+    let a = app();
+    let p = a
+        .add_person(Some("Solo"), None, Sex::Unknown, None)
+        .unwrap();
+    assert!(a.delete_name_from_person(&p.id, 0).is_err());
+}
+
+// ── Phase 2: notes search ─────────────────────────────────────────────────────
+
+#[test]
+fn search_notes_finds_person_notes() {
+    let a = app();
+    let mut p = a
+        .add_person(Some("Alice"), Some("Notesworthy"), Sex::Female, None)
+        .unwrap();
+    p.notes = Some("emigrated to Canada in 1902".to_string());
+    a.update_person(p).unwrap();
+
+    let results = a.search_notes("Canada").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].kind, "Person");
+    assert!(results[0].notes.contains("Canada"));
+}
+
+#[test]
+fn search_notes_finds_event_notes() {
+    let a = app();
+    let p = a
+        .add_person(Some("Bob"), Some("Clues"), Sex::Male, None)
+        .unwrap();
+    let mut e = a
+        .add_event(p.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    e.notes = Some("witnessed by Dr. Holmes".to_string());
+    a.update_event(e).unwrap();
+
+    let results = a.search_notes("Holmes").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].kind, "Event");
+}
+
+#[test]
+fn search_notes_case_insensitive() {
+    let a = app();
+    let mut p = a
+        .add_person(Some("Clara"), None, Sex::Female, None)
+        .unwrap();
+    p.notes = Some("Moved to BOSTON".to_string());
+    a.update_person(p).unwrap();
+
+    assert_eq!(a.search_notes("boston").unwrap().len(), 1);
+    assert_eq!(a.search_notes("BOSTON").unwrap().len(), 1);
+    assert_eq!(a.search_notes("xyz_no_match").unwrap().len(), 0);
+}

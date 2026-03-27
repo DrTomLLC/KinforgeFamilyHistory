@@ -2,7 +2,8 @@ use anyhow::{bail, Result};
 use clap::Subcommand;
 use colored::Colorize;
 use kinforge_app::Application;
-use kinforge_core::models::{EventDate, EventId, EventType, PersonId};
+use kinforge_core::models::{EventDate, EventId, EventType, PersonId, Place, PlaceId};
+use kinforge_storage::Database;
 
 #[derive(Subcommand)]
 pub enum EventCommands {
@@ -31,7 +32,7 @@ pub enum EventCommands {
     List { person: String },
     /// Show a single event
     Show { id: String },
-    /// Update an event's date or notes
+    /// Update an event's date, place, or notes
     Update {
         id: String,
         /// Date in YYYY-MM-DD format
@@ -43,6 +44,9 @@ pub enum EventCommands {
         /// Second date for 'between' qualifier (YYYY-MM-DD)
         #[arg(long)]
         date2: Option<String>,
+        /// Place name — searched first; created if not found
+        #[arg(long)]
+        place: Option<String>,
         #[arg(long)]
         notes: Option<String>,
     },
@@ -197,12 +201,16 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
             date,
             qualifier,
             date2,
+            place,
             notes,
         } => {
             let eid = EventId::from_str(&id)?;
             let mut event = app.get_event(&eid)?;
             if let Some(ref d) = date {
                 event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
+            }
+            if let Some(ref place_name) = place {
+                event.place_id = Some(find_or_create_place(&app.db, place_name)?);
             }
             if let Some(n) = notes {
                 event.notes = Some(n);
@@ -226,6 +234,21 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Look up a place by exact name (case-insensitive); create it if not found.
+fn find_or_create_place(db: &Database, name: &str) -> Result<PlaceId> {
+    let lower = name.to_lowercase();
+    if let Some(existing) = db
+        .list_places()?
+        .into_iter()
+        .find(|p| p.name.to_lowercase() == lower)
+    {
+        return Ok(existing.id);
+    }
+    let place = Place::new(name);
+    db.insert_place(&place)?;
+    Ok(place.id)
 }
 
 fn format_confidence(conf: &kinforge_core::models::ConfidenceLevel) -> String {

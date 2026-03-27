@@ -4,6 +4,19 @@ use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
 use kinforge_storage::{repository::DatabaseStats, Database};
 use std::path::Path;
 
+/// A single hit from a notes full-text search.
+#[derive(Debug, Clone)]
+pub struct NotesMatch {
+    /// "Person" or "Event"
+    pub kind: String,
+    /// UUID of the entity
+    pub id: String,
+    /// Human-readable label (person name, or "Name — EventType")
+    pub label: String,
+    /// The full notes text that matched
+    pub notes: String,
+}
+
 pub struct Application {
     pub db: Database,
     pub config: Config,
@@ -87,6 +100,102 @@ impl Application {
         validation::validate_person(&person)?;
         self.db.update_person(&person)?;
         Ok(person)
+    }
+
+    /// Edit a name entry in-place by zero-based index.
+    ///
+    /// Only the supplied fields are changed; pass `None` to leave a field
+    /// unchanged.  Pass `Some(None)` to clear a given/surname field.
+    pub fn update_name_on_person(
+        &self,
+        person_id: &PersonId,
+        index: usize,
+        given: Option<Option<String>>,
+        surname: Option<Option<String>>,
+        name_type: Option<NameType>,
+    ) -> KinforgeResult<Person> {
+        let mut person = self.db.get_person(person_id)?;
+        let entry = person.names.get_mut(index).ok_or_else(|| {
+            KinforgeError::InvalidField {
+                field: "name index".to_string(),
+                value: index.to_string(),
+            }
+        })?;
+        if let Some(g) = given {
+            entry.given = g;
+        }
+        if let Some(s) = surname {
+            entry.surname = s;
+        }
+        if let Some(nt) = name_type {
+            entry.name_type = nt;
+        }
+        validation::validate_person(&person)?;
+        self.db.update_person(&person)?;
+        Ok(person)
+    }
+
+    /// Remove a name entry by zero-based index.
+    ///
+    /// The primary name (index 0) can only be removed if there is at least
+    /// one other name remaining.
+    pub fn delete_name_from_person(
+        &self,
+        person_id: &PersonId,
+        index: usize,
+    ) -> KinforgeResult<Person> {
+        let mut person = self.db.get_person(person_id)?;
+        if person.names.len() <= 1 && index == 0 {
+            return Err(KinforgeError::InvalidField {
+                field: "name index".to_string(),
+                value: "cannot delete the only name; delete the person instead".to_string(),
+            });
+        }
+        if index >= person.names.len() {
+            return Err(KinforgeError::InvalidField {
+                field: "name index".to_string(),
+                value: format!("{} (person has {} name(s))", index, person.names.len()),
+            });
+        }
+        person.names.remove(index);
+        self.db.update_person(&person)?;
+        Ok(person)
+    }
+
+    /// Search person notes and event notes for `query` (case-insensitive).
+    ///
+    /// Returns a flat list of `(entity_kind, display_label, notes_text)`.
+    pub fn search_notes(&self, query: &str) -> KinforgeResult<Vec<NotesMatch>> {
+        let q = query.to_lowercase();
+        let mut results = Vec::new();
+
+        for person in self.db.list_people()? {
+            if let Some(ref notes) = person.notes {
+                if notes.to_lowercase().contains(&q) {
+                    results.push(NotesMatch {
+                        kind: "Person".to_string(),
+                        id: person.id.to_string(),
+                        label: person.display_name(),
+                        notes: notes.clone(),
+                    });
+                }
+            }
+            // Also search event notes for this person
+            for event in self.db.list_events_for_person(&person.id)? {
+                if let Some(ref notes) = event.notes {
+                    if notes.to_lowercase().contains(&q) {
+                        results.push(NotesMatch {
+                            kind: "Event".to_string(),
+                            id: event.id.to_string(),
+                            label: format!("{} — {}", person.display_name(), event.event_type),
+                            notes: notes.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     pub fn update_person(&self, person: Person) -> KinforgeResult<Person> {

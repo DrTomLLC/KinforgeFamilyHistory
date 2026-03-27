@@ -72,12 +72,13 @@ pub fn individual_report(db: &Database, person_id: &PersonId) -> KinforgeResult<
         died_str.yellow()
     ));
 
-    // Extra names
-    if person.names.len() > 1 {
+    // All names with indexes (so user knows which index to use for update-name / delete-name)
+    if !person.names.is_empty() {
         out.push_str(&format!("\n{}\n", "Names:".cyan().bold()));
-        for name in &person.names {
+        for (i, name) in person.names.iter().enumerate() {
             out.push_str(&format!(
-                "  {} {}\n",
+                "  {} {} {}\n",
+                format!("[{}]", i).yellow(),
                 name.full_name().bold(),
                 format!("({})", name.name_type).bright_black()
             ));
@@ -325,3 +326,157 @@ fn build_descendant_tree(
     Ok(())
 }
 
+// ─── family group sheet ─────────────────────────────────────────────────────
+
+/// Generate a Family Group Sheet for a person.
+///
+/// Shows the person's vital events, their spouse(s), and all children with
+/// each child's birth and death dates — the standard genealogical family unit
+/// report.
+pub fn family_group_sheet(db: &Database, person_id: &PersonId) -> KinforgeResult<String> {
+    let person = db.get_person(person_id)?;
+    let mut out = String::new();
+
+    out.push_str(&format!(
+        "{}\n",
+        "  Family Group Sheet  ".bold().bright_cyan().on_black()
+    ));
+    out.push_str(&format!("{}\n\n", "─".repeat(40).bright_black()));
+
+    // ── Primary person ──────────────────────────────────────────────────
+    out.push_str(&format!(
+        "{} {}\n",
+        "Subject:".cyan().bold(),
+        person.display_name().bold()
+    ));
+    out.push_str(&format!(
+        "{}  {}\n",
+        "ID:     ".cyan(),
+        person.id.to_string().bright_black()
+    ));
+    out.push_str(&format!("{}  {}\n", "Sex:    ".cyan(), fmt_sex(&person.sex)));
+    append_vital_events(db, person_id, &mut out)?;
+
+    let rels = db.list_relationships_for_person(person_id)?;
+
+    // ── Spouses ─────────────────────────────────────────────────────────
+    let spouses: Vec<&PersonId> = rels
+        .iter()
+        .filter(|r| r.rel_type == RelationshipType::Spouse)
+        .map(|r| {
+            if r.person1_id == *person_id {
+                &r.person2_id
+            } else {
+                &r.person1_id
+            }
+        })
+        .collect();
+
+    if !spouses.is_empty() {
+        out.push_str(&format!(
+            "\n{}\n",
+            format!("  {} Spouse(s)  ", spouses.len())
+                .bold()
+                .bright_cyan()
+                .on_black()
+        ));
+        for spouse_id in &spouses {
+            if let Ok(spouse) = db.get_person(spouse_id) {
+                out.push_str(&format!(
+                    "  {} {} {}\n",
+                    fmt_sex(&spouse.sex),
+                    spouse.display_name().bold(),
+                    spouse.id.to_string().bright_black()
+                ));
+                append_vital_events(db, spouse_id, &mut out)?;
+            }
+        }
+    }
+
+    // ── Children ─────────────────────────────────────────────────────────
+    let children: Vec<&PersonId> = rels
+        .iter()
+        .filter(|r| r.rel_type == RelationshipType::ParentChild && r.person1_id == *person_id)
+        .map(|r| &r.person2_id)
+        .collect();
+
+    if !children.is_empty() {
+        out.push_str(&format!(
+            "\n{}\n",
+            format!("  {} Child(ren)  ", children.len())
+                .bold()
+                .bright_cyan()
+                .on_black()
+        ));
+        for (i, child_id) in children.iter().enumerate() {
+            if let Ok(child) = db.get_person(child_id) {
+                let events = db.list_events_for_person(child_id)?;
+                let birth = events
+                    .iter()
+                    .find(|e| matches!(e.event_type, EventType::Birth))
+                    .and_then(|e| e.date.as_ref())
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let death = events
+                    .iter()
+                    .find(|e| matches!(e.event_type, EventType::Death))
+                    .and_then(|e| e.date.as_ref())
+                    .map(|d| format!(" \u{2013} d.{}", d))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "  {}. {} {} {} {}{}\n",
+                    (i + 1).to_string().yellow(),
+                    fmt_sex(&child.sex),
+                    child.display_name().bold(),
+                    child.id.to_string().bright_black(),
+                    format!("b.{}", birth).yellow(),
+                    death.yellow()
+                ));
+            }
+        }
+    }
+
+    out.push('\n');
+    Ok(out)
+}
+
+/// Append birth, death, marriage, baptism, burial events indented under the entry.
+fn append_vital_events(
+    db: &Database,
+    person_id: &PersonId,
+    out: &mut String,
+) -> KinforgeResult<()> {
+    let events = db.list_events_for_person(person_id)?;
+    let vital_types = [
+        EventType::Birth,
+        EventType::Baptism,
+        EventType::Marriage,
+        EventType::Death,
+        EventType::Burial,
+    ];
+    for vt in &vital_types {
+        if let Some(e) = events
+            .iter()
+            .find(|e| std::mem::discriminant(&e.event_type) == std::mem::discriminant(vt))
+        {
+            let date_str = e
+                .date
+                .as_ref()
+                .map(|d| d.to_string().yellow().to_string())
+                .unwrap_or_else(|| "?".bright_black().to_string());
+            let place_str = e
+                .place_id
+                .as_ref()
+                .and_then(|pid| db.get_place(pid).ok())
+                .map(|pl| format!(" @ {}", pl.name.green()))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "         {:<10} {}{}\n",
+                e.event_type.to_string().bright_cyan(),
+                date_str,
+                place_str
+            ));
+        }
+    }
+    Ok(())
+}

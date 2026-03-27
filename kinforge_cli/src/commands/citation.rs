@@ -19,6 +19,8 @@ pub enum CitationCommands {
         #[arg(long)]
         notes: Option<String>,
     },
+    /// Show a single citation's details
+    Show { id: String },
     /// List citations for an event
     List { event: String },
     /// Update a citation's page or confidence
@@ -64,6 +66,31 @@ pub fn handle(cmd: CitationCommands, app: &Application) -> Result<()> {
                 "Added citation:".green().bold(),
                 citation.id.to_string().bright_black()
             );
+        }
+
+        CitationCommands::Show { id } => {
+            let cid = CitationId::from_str(&id)?;
+            let c = app.get_citation(&cid)?;
+            let src = app
+                .get_source(&c.source_id)
+                .map(|s| s.title)
+                .unwrap_or_else(|_| "?".to_string());
+            let event_label = app
+                .get_event(&c.event_id)
+                .map(|e| e.event_type.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            println!("{} {}", "ID:        ".cyan(), c.id.to_string().bright_black());
+            println!("{} {}", "Source:    ".cyan(), src.bold());
+            println!("{} {}", "Source ID: ".cyan(), c.source_id.to_string().bright_black());
+            println!("{} {}", "Event:     ".cyan(), event_label.bright_cyan());
+            println!("{} {}", "Event ID:  ".cyan(), c.event_id.to_string().bright_black());
+            if let Some(ref p) = c.page {
+                println!("{} {}", "Page:      ".cyan(), p.yellow());
+            }
+            println!("{} {}", "Confidence:".cyan(), fmt_confidence(&c.confidence));
+            if let Some(ref n) = c.notes {
+                println!("{} {}", "Notes:     ".cyan(), n);
+            }
         }
 
         CitationCommands::List { event } => {

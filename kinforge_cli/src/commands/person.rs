@@ -40,6 +40,26 @@ pub enum PersonCommands {
         #[arg(long, default_value = "birth")]
         name_type: String,
     },
+    /// Edit an existing name entry in-place (by 0-based index)
+    UpdateName {
+        id: String,
+        /// 0-based index of the name to edit (use 'person show' to see indexes)
+        #[arg(long, default_value = "0")]
+        index: usize,
+        #[arg(long)]
+        given: Option<String>,
+        #[arg(long)]
+        surname: Option<String>,
+        #[arg(long)]
+        name_type: Option<String>,
+    },
+    /// Delete a name entry by index (cannot delete the only name)
+    DeleteName {
+        id: String,
+        /// 0-based index of the name to remove
+        #[arg(long, default_value = "0")]
+        index: usize,
+    },
     /// Delete a person (also deletes their events and relationships)
     Delete { id: String },
 }
@@ -128,6 +148,40 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 person.display_name().bold(),
                 "\u{2014}".bright_black(),
                 format!("{} name(s) total", person.names.len()).bright_black()
+            );
+        }
+
+        PersonCommands::UpdateName {
+            id,
+            index,
+            given,
+            surname,
+            name_type,
+        } => {
+            let pid = PersonId::from_str(&id)?;
+            // Wrap given/surname: Some(v) means "set to v", None means "leave unchanged"
+            let given_opt = given.map(|g| if g.is_empty() { None } else { Some(g) });
+            let surname_opt = surname.map(|s| if s.is_empty() { None } else { Some(s) });
+            let nt_opt = name_type.as_deref().map(|s| s.parse::<NameType>()).transpose()?;
+            let person = app.update_name_on_person(&pid, index, given_opt, surname_opt, nt_opt)?;
+            println!(
+                "{} name [{}] on {} {}",
+                "Updated:".green().bold(),
+                index.to_string().yellow(),
+                person.display_name().bold(),
+                format!("({})", person.id).bright_black()
+            );
+        }
+
+        PersonCommands::DeleteName { id, index } => {
+            let pid = PersonId::from_str(&id)?;
+            let person = app.delete_name_from_person(&pid, index)?;
+            println!(
+                "{} name [{}] from {} {}",
+                "Deleted:".yellow().bold(),
+                index.to_string().yellow(),
+                person.display_name().bold(),
+                format!("— {} name(s) remain", person.names.len()).bright_black()
             );
         }
 
