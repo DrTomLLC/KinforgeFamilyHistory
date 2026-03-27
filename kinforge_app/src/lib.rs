@@ -309,6 +309,58 @@ impl Application {
         self.add_relationship(RelationshipType::Spouse, person1_id, person2_id, notes)
     }
 
+    /// Merge `source_id` into `target_id`.
+    ///
+    /// All names unique to source are appended to target.  All events and
+    /// relationships belonging to source are reassigned to target.  The source
+    /// person record is then deleted.  Returns the updated target person.
+    pub fn merge_person(
+        &self,
+        source_id: &PersonId,
+        target_id: &PersonId,
+    ) -> KinforgeResult<Person> {
+        if source_id == target_id {
+            return Err(KinforgeError::Validation(
+                "cannot merge a person with themselves".to_string(),
+            ));
+        }
+
+        let source = self.db.get_person(source_id)?;
+        let mut target = self.db.get_person(target_id)?;
+
+        // Copy unique names (match on given + surname).
+        for name in &source.names {
+            let already = target.names.iter().any(|n| {
+                n.given.as_deref() == name.given.as_deref()
+                    && n.surname.as_deref() == name.surname.as_deref()
+            });
+            if !already {
+                target.names.push(name.clone());
+            }
+        }
+
+        // Merge notes: append source notes to target if not already present.
+        match (&target.notes, &source.notes) {
+            (None, Some(sn)) => target.notes = Some(sn.clone()),
+            (Some(tn), Some(sn)) if !tn.contains(sn.as_str()) => {
+                target.notes = Some(format!("{}\n{}", tn, sn));
+            }
+            _ => {}
+        }
+
+        self.db.update_person(&target)?;
+
+        // Reassign events and relationships before deleting source.
+        self.db.reassign_events_to_person(source_id, target_id)?;
+        self.db
+            .reassign_relationships_to_person(source_id, target_id)?;
+
+        // Delete source person (cascade removes their person_names only; events/rels moved).
+        self.db.delete_person(source_id)?;
+
+        self.db.get_person(target_id)
+    }
+
     // ── Data integrity check ───────────────────────────────────────────────
 
     /// Run a sweep of the database looking for common data quality problems.
@@ -573,6 +625,17 @@ impl Application {
 
     pub fn list_citations_for_event(&self, event_id: &EventId) -> KinforgeResult<Vec<Citation>> {
         self.db.list_citations_for_event(event_id)
+    }
+
+    pub fn list_citations_for_source(
+        &self,
+        source_id: &SourceId,
+    ) -> KinforgeResult<Vec<Citation>> {
+        self.db.list_citations_for_source(source_id)
+    }
+
+    pub fn list_all_citations(&self) -> KinforgeResult<Vec<Citation>> {
+        self.db.list_all_citations()
     }
 }
 

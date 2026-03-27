@@ -90,6 +90,14 @@ pub enum PersonCommands {
         #[arg(long)]
         notes: Option<String>,
     },
+    /// Merge another person (--from) into this one, then delete the duplicate
+    Merge {
+        /// Target person: the one to keep (ID or short prefix)
+        id: String,
+        /// Source person: the duplicate to merge in and delete (ID or short prefix)
+        #[arg(long)]
+        from: String,
+    },
     /// Delete a person (also deletes their events and relationships)
     Delete { id: String },
 }
@@ -130,11 +138,43 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                         .on_black()
                 );
                 for p in &people {
+                    let events = app.list_events_for_person(&p.id).unwrap_or_default();
+                    let birth_year = events
+                        .iter()
+                        .find(|e| matches!(e.event_type, kinforge_core::models::EventType::Birth))
+                        .and_then(|e| e.date.as_ref())
+                        .and_then(|d| match d {
+                            kinforge_core::models::EventDate::Exact(nd)
+                            | kinforge_core::models::EventDate::Approximate(nd) => {
+                                Some(nd.format("%Y").to_string())
+                            }
+                            _ => None,
+                        });
+                    let death_year = events
+                        .iter()
+                        .find(|e| matches!(e.event_type, kinforge_core::models::EventType::Death))
+                        .and_then(|e| e.date.as_ref())
+                        .and_then(|d| match d {
+                            kinforge_core::models::EventDate::Exact(nd)
+                            | kinforge_core::models::EventDate::Approximate(nd) => {
+                                Some(nd.format("%Y").to_string())
+                            }
+                            _ => None,
+                        });
+                    let life_str = match (birth_year, death_year) {
+                        (Some(b), Some(d)) => {
+                            format!(" {}", format!("b.{} \u{2013} d.{}", b, d).yellow())
+                        }
+                        (Some(b), None) => format!(" {}", format!("b.{}", b).yellow()),
+                        (None, Some(d)) => format!(" {}", format!("d.{}", d).yellow()),
+                        (None, None) => String::new(),
+                    };
                     println!(
-                        "  {} {} {}",
+                        "  {} {} {}{}",
                         p.id.to_string().bright_black(),
                         p.display_name().bold(),
-                        format!("({})", p.sex).bright_black()
+                        format!("({})", p.sex).bright_black(),
+                        life_str
                     );
                 }
             }
@@ -326,6 +366,22 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 n1.bold(),
                 "\u{2194} spouse \u{2194}".bright_black(),
                 n2.bold()
+            );
+        }
+
+        PersonCommands::Merge { id, from } => {
+            let target_id = app.resolve_person_id(&id)?;
+            let source_id = app.resolve_person_id(&from)?;
+            let source_name = app.get_person(&source_id)?.display_name();
+            let merged = app.merge_person(&source_id, &target_id)?;
+            println!(
+                "{} {} {} {} {} {}",
+                "Merged:".green().bold(),
+                source_name.bold(),
+                "\u{2192}".bright_black(),
+                merged.display_name().bold(),
+                "\u{2014}".bright_black(),
+                format!("{} name(s), kept target ID", merged.names.len()).bright_black()
             );
         }
 

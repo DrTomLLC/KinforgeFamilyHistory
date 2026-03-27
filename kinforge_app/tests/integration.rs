@@ -533,3 +533,127 @@ fn search_notes_case_insensitive() {
     assert_eq!(a.search_notes("BOSTON").unwrap().len(), 1);
     assert_eq!(a.search_notes("xyz_no_match").unwrap().len(), 0);
 }
+
+// ── Phase 4: Merge, citations by source, ancestor tree ────────────────────────
+
+#[test]
+fn merge_person_combines_names_and_events() {
+    let a = app();
+    let source = a
+        .add_person(Some("William"), Some("Smith"), Sex::Male, Some("duplicate"))
+        .unwrap();
+    let target = a
+        .add_person(Some("Will"), Some("Smith"), Sex::Male, None)
+        .unwrap();
+
+    // Add an event on the source person
+    a.add_event(
+        source.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1880, 3, 1).unwrap())),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let merged = a.merge_person(&source.id, &target.id).unwrap();
+
+    // Source is gone
+    assert!(a.get_person(&source.id).is_err());
+
+    // Target has both names
+    assert_eq!(merged.names.len(), 2);
+
+    // Event is now on target
+    let events = a.list_events_for_person(&target.id).unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0].event_type, EventType::Birth));
+
+    // Notes merged
+    assert!(merged.notes.as_deref().unwrap_or("").contains("duplicate"));
+}
+
+#[test]
+fn merge_person_reassigns_relationships() {
+    let a = app();
+    let child = a
+        .add_person(Some("Charlie"), None, Sex::Male, None)
+        .unwrap();
+    let source_parent = a
+        .add_person(Some("Alice"), None, Sex::Female, None)
+        .unwrap();
+    let target_parent = a
+        .add_person(Some("Alicia"), None, Sex::Female, None)
+        .unwrap();
+
+    a.add_parent(child.id.clone(), source_parent.id.clone(), None)
+        .unwrap();
+
+    let merged = a.merge_person(&source_parent.id, &target_parent.id).unwrap();
+
+    // The child should now be linked to target_parent
+    let rels = a.list_relationships_for_person(&merged.id).unwrap();
+    let parent_rels: Vec<_> = rels
+        .iter()
+        .filter(|r| r.rel_type == RelationshipType::ParentChild)
+        .collect();
+    assert_eq!(parent_rels.len(), 1);
+    assert_eq!(parent_rels[0].person2_id, child.id);
+}
+
+#[test]
+fn merge_person_self_rejected() {
+    let a = app();
+    let p = a
+        .add_person(Some("John"), None, Sex::Male, None)
+        .unwrap();
+    assert!(a.merge_person(&p.id, &p.id).is_err());
+}
+
+#[test]
+fn list_citations_for_source_returns_correct() {
+    let a = app();
+    let person = a
+        .add_person(Some("Test"), None, Sex::Unknown, None)
+        .unwrap();
+    let event = a
+        .add_event(person.id.clone(), EventType::Birth, None, None, None)
+        .unwrap();
+    let source1 = a
+        .add_source("Book One", None, None, None, None, None)
+        .unwrap();
+    let source2 = a
+        .add_source("Book Two", None, None, None, None, None)
+        .unwrap();
+
+    a.add_citation(
+        source1.id.clone(),
+        event.id.clone(),
+        Some("p.12"),
+        ConfidenceLevel::Primary,
+        None,
+    )
+    .unwrap();
+    a.add_citation(
+        source1.id.clone(),
+        event.id.clone(),
+        Some("p.15"),
+        ConfidenceLevel::Secondary,
+        None,
+    )
+    .unwrap();
+    a.add_citation(
+        source2.id.clone(),
+        event.id.clone(),
+        None,
+        ConfidenceLevel::Questionable,
+        None,
+    )
+    .unwrap();
+
+    let s1_cits = a.list_citations_for_source(&source1.id).unwrap();
+    assert_eq!(s1_cits.len(), 2);
+
+    let s2_cits = a.list_citations_for_source(&source2.id).unwrap();
+    assert_eq!(s2_cits.len(), 1);
+}

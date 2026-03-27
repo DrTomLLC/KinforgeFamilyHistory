@@ -32,9 +32,12 @@ pub enum EventCommands {
     List { person: String },
     /// Show a single event
     Show { id: String },
-    /// Update an event's date, place, or notes
+    /// Update an event's type, date, place, or notes
     Update {
         id: String,
+        /// Change the event type (birth, death, marriage, etc.)
+        #[arg(long)]
+        event_type: Option<String>,
         /// Date in YYYY-MM-DD format
         #[arg(long)]
         date: Option<String>,
@@ -198,6 +201,7 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
 
         EventCommands::Update {
             id,
+            event_type,
             date,
             qualifier,
             date2,
@@ -206,6 +210,9 @@ pub fn handle(cmd: EventCommands, app: &Application) -> Result<()> {
         } => {
             let eid = app.resolve_event_id(&id)?;
             let mut event = app.get_event(&eid)?;
+            if let Some(ref et) = event_type {
+                event.event_type = et.parse().unwrap_or(EventType::Other(et.clone()));
+            }
             if let Some(ref d) = date {
                 event.date = Some(parse_event_date(d, &qualifier, date2.as_deref())?);
             }

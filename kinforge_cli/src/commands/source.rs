@@ -36,6 +36,8 @@ pub enum SourceCommands {
         #[arg(long)]
         year: Option<i32>,
         #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
         notes: Option<String>,
     },
     /// Delete a source
@@ -129,6 +131,7 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
             author,
             publication,
             year,
+            repository,
             notes,
         } => {
             let sid = app.resolve_source_id(&id)?;
@@ -144,6 +147,9 @@ pub fn handle(cmd: SourceCommands, app: &Application) -> Result<()> {
             }
             if let Some(y) = year {
                 source.year = Some(y);
+            }
+            if let Some(r) = repository {
+                source.repository = Some(r);
             }
             if let Some(n) = notes {
                 source.notes = Some(n);

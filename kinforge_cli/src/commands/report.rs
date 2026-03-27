@@ -6,7 +6,7 @@ use kinforge_reports::{
     ancestor_report, descendant_report, family_group_sheet, individual_report, people_list_report,
     timeline_report,
 };
-use kinforge_viz::ascii_family_tree;
+use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 
 #[derive(Subcommand)]
 pub enum ReportCommands {
@@ -38,6 +38,12 @@ pub enum ReportCommands {
     Family { id: String },
     /// Chronological timeline of all events for a person
     Timeline { id: String },
+    /// ASCII ancestor tree (parents, grandparents, …)
+    AncestorTree {
+        id: String,
+        #[arg(long, default_value = "3")]
+        depth: u32,
+    },
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -95,6 +101,10 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         ReportCommands::Timeline { id } => {
             let pid = app.resolve_person_id(&id)?;
             print!("{}", timeline_report(&app.db, &pid)?);
+        }
+        ReportCommands::AncestorTree { id, depth } => {
+            let pid = app.resolve_person_id(&id)?;
+            print!("{}", ascii_ancestor_tree(&app.db, &pid, depth)?);
         }
     }
     Ok(())

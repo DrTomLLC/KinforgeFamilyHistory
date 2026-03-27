@@ -6,23 +6,39 @@ use kinforge_query::{EventQuery, PersonQuery, SourceQuery};
 
 #[derive(Subcommand)]
 pub enum SearchCommands {
-    /// Search people by name (and optionally sex)
+    /// Search people by name and/or sex
     People {
-        query: String,
+        /// Match against any part of the full name
+        #[arg(long)]
+        name: Option<String>,
+        /// Match given (first) name
+        #[arg(long)]
+        given: Option<String>,
+        /// Match surname (last name)
+        #[arg(long)]
+        surname: Option<String>,
+        /// Filter by sex: male, female, unknown
         #[arg(long)]
         sex: Option<String>,
     },
-    /// Search sources by title or author
+    /// Search sources by title, author, and/or year range
     Sources {
-        query: String,
+        /// Title fragment to search
+        #[arg(long)]
+        title: Option<String>,
+        /// Author fragment to search
+        #[arg(long)]
+        author: Option<String>,
+        /// Earliest year (use with --to-year)
         #[arg(long)]
         from_year: Option<i32>,
+        /// Latest year (use with --from-year)
         #[arg(long)]
         to_year: Option<i32>,
     },
     /// Search person notes and event notes for a keyword
     Notes { query: String },
-    /// Search events by place name (optional: filter by event type)
+    /// Search events by place name, event type, and/or person
     Events {
         /// Place name fragment to search
         #[arg(long)]
@@ -30,23 +46,44 @@ pub enum SearchCommands {
         /// Event type filter (birth, death, marriage, etc.)
         #[arg(long)]
         event_type: Option<String>,
+        /// Filter to a specific person (ID or short prefix)
+        #[arg(long)]
+        person: Option<String>,
+    },
+    /// Search citations by source title fragment
+    Citations {
+        /// Source title fragment
+        #[arg(long)]
+        source: Option<String>,
     },
 }
 
 pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
     match cmd {
-        SearchCommands::People { query, sex } => {
-            let mut q = PersonQuery::new().name_contains(&query);
+        SearchCommands::People { name, given, surname, sex } => {
+            if name.is_none() && given.is_none() && surname.is_none() && sex.is_none() {
+                println!(
+                    "{}",
+                    "Provide at least one filter: --name, --given, --surname, or --sex.".yellow()
+                );
+                return Ok(());
+            }
+            let mut q = PersonQuery::new();
+            if let Some(ref n) = name {
+                q = q.name_contains(n.as_str());
+            }
+            if let Some(ref g) = given {
+                q = q.given_contains(g.as_str());
+            }
+            if let Some(ref s) = surname {
+                q = q.surname_contains(s.as_str());
+            }
             if let Some(s) = sex {
                 q = q.sex(s.parse()?);
             }
             let results = q.run(&app.db)?;
             if results.is_empty() {
-                println!(
-                    "{} \u{2018}{}\u{2019}",
-                    "No people matching".bright_black(),
-                    query.yellow()
-                );
+                println!("{}", "No matching people.".bright_black());
             } else {
                 println!(
                     "{}\n",
@@ -66,22 +103,28 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
             }
         }
 
-        SearchCommands::Sources {
-            query,
-            from_year,
-            to_year,
-        } => {
-            let mut q = SourceQuery::new().title_contains(&query);
+        SearchCommands::Sources { title, author, from_year, to_year } => {
+            if title.is_none() && author.is_none() && from_year.is_none() {
+                println!(
+                    "{}",
+                    "Provide at least one filter: --title, --author, or --from-year/--to-year."
+                        .yellow()
+                );
+                return Ok(());
+            }
+            let mut q = SourceQuery::new();
+            if let Some(ref t) = title {
+                q = q.title_contains(t.as_str());
+            }
+            if let Some(ref a) = author {
+                q = q.author_contains(a.as_str());
+            }
             if let (Some(f), Some(t)) = (from_year, to_year) {
                 q = q.year_range(f, t);
             }
             let results = q.run(&app.db)?;
             if results.is_empty() {
-                println!(
-                    "{} \u{2018}{}\u{2019}",
-                    "No sources matching".bright_black(),
-                    query.yellow()
-                );
+                println!("{}", "No matching sources.".bright_black());
             } else {
                 println!(
                     "{}\n",
@@ -95,11 +138,17 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                         .year
                         .map(|y| format!(" {}", format!("({})", y).yellow()))
                         .unwrap_or_default();
+                    let author_str = s
+                        .author
+                        .as_deref()
+                        .map(|a| format!(" {}", format!("— {}", a).bright_black()))
+                        .unwrap_or_default();
                     println!(
-                        "  {} {}{}",
+                        "  {} {}{}{}",
                         s.id.to_string().bright_black(),
                         s.title.bold(),
-                        year
+                        year,
+                        author_str
                     );
                 }
             }
@@ -129,25 +178,20 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                         "\u{2014}".bright_black(),
                         m.label.bold()
                     );
-                    // Show a one-line excerpt with the match highlighted
                     let excerpt = truncate_notes(&m.notes, 120);
                     println!("    {}", excerpt.bright_black());
                 }
             }
         }
 
-        SearchCommands::Events {
-            place,
-            event_type,
-        } => {
-            if place.is_none() && event_type.is_none() {
+        SearchCommands::Events { place, event_type, person } => {
+            if place.is_none() && event_type.is_none() && person.is_none() {
                 println!(
                     "{}",
-                    "Provide --place and/or --event-type to filter events.".yellow()
+                    "Provide --place, --event-type, and/or --person to filter events.".yellow()
                 );
                 return Ok(());
             }
-
             let mut q = EventQuery::new();
             if let Some(ref p) = place {
                 q = q.place_contains(p.as_str());
@@ -157,6 +201,10 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                     .parse()
                     .unwrap_or(kinforge_core::models::EventType::Other(et.clone()));
                 q = q.of_type(parsed);
+            }
+            if let Some(ref person_input) = person {
+                let pid = app.resolve_person_id(person_input)?;
+                q = q.for_person(pid);
             }
             let events = q.run(&app.db)?;
             if events.is_empty() {
@@ -197,11 +245,100 @@ pub fn handle(cmd: SearchCommands, app: &Application) -> Result<()> {
                 }
             }
         }
+
+        SearchCommands::Citations { source } => {
+            if source.is_none() {
+                println!(
+                    "{}",
+                    "Provide --source <title fragment> to search citations.".yellow()
+                );
+                return Ok(());
+            }
+            let filter = source.as_deref().unwrap_or("").to_lowercase();
+            let all_sources = app.list_sources()?;
+            let matching_sources: Vec<_> = all_sources
+                .iter()
+                .filter(|s| s.title.to_lowercase().contains(&filter))
+                .collect();
+
+            if matching_sources.is_empty() {
+                println!("{}", "No sources match that title fragment.".bright_black());
+                return Ok(());
+            }
+
+            let mut total = 0usize;
+            let mut out_lines: Vec<String> = Vec::new();
+
+            for src in &matching_sources {
+                let citations = app.list_citations_for_source(&src.id)?;
+                if citations.is_empty() {
+                    continue;
+                }
+                out_lines.push(format!(
+                    "\n{} {}",
+                    src.title.bold(),
+                    src.id.to_string().bright_black()
+                ));
+                for c in &citations {
+                    let event_label = app
+                        .get_event(&c.event_id)
+                        .ok()
+                        .map(|e| {
+                            let person_name = app
+                                .get_person(&e.person_id)
+                                .map(|p| p.display_name())
+                                .unwrap_or_else(|_| e.person_id.to_string());
+                            format!("{} \u{2014} {}", person_name, e.event_type)
+                        })
+                        .unwrap_or_else(|| "?".to_string());
+                    let conf = fmt_confidence(&c.confidence);
+                    let page_str = c
+                        .page
+                        .as_deref()
+                        .map(|p| format!(" p.{}", p.yellow()))
+                        .unwrap_or_default();
+                    out_lines.push(format!(
+                        "  {} {} {}{}",
+                        c.id.to_string().bright_black(),
+                        event_label.bold(),
+                        conf,
+                        page_str
+                    ));
+                    total += 1;
+                }
+            }
+
+            if total == 0 {
+                println!("{}", "No citations found for matching sources.".bright_black());
+            } else {
+                println!(
+                    "{}\n",
+                    format!("  {} citation(s)  ", total)
+                        .bold()
+                        .bright_cyan()
+                        .on_black()
+                );
+                for line in &out_lines {
+                    println!("{}", line);
+                }
+            }
+        }
     }
     Ok(())
 }
 
-/// Truncate a notes string to at most `max_chars` and add "…" if cut.
+fn fmt_confidence(conf: &kinforge_core::models::ConfidenceLevel) -> String {
+    use kinforge_core::models::ConfidenceLevel;
+    let s = conf.to_string();
+    match conf {
+        ConfidenceLevel::Direct => s.bright_green().bold().to_string(),
+        ConfidenceLevel::Primary => s.green().to_string(),
+        ConfidenceLevel::Secondary => s.yellow().to_string(),
+        ConfidenceLevel::Questionable => s.red().to_string(),
+        ConfidenceLevel::Unreliable => s.bright_red().bold().to_string(),
+    }
+}
+
 fn truncate_notes(s: &str, max_chars: usize) -> String {
     let single_line: String = s.chars().map(|c| if c == '\n' { ' ' } else { c }).collect();
     if single_line.chars().count() <= max_chars {

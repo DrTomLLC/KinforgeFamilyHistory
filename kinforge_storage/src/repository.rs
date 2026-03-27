@@ -891,6 +891,81 @@ impl Database {
         Ok(())
     }
 
+    /// List all citations that reference a given source.
+    pub fn list_citations_for_source(&self, source_id: &SourceId) -> KinforgeResult<Vec<Citation>> {
+        fetch_citation_rows(
+            &self.conn,
+            "SELECT id, source_id, event_id, page, confidence, notes
+             FROM citations WHERE source_id = ?1 ORDER BY rowid",
+            Some(&source_id.as_str()),
+        )
+        .map_err(|e| KinforgeError::Storage(e.to_string()))?
+        .into_iter()
+        .map(assemble_citation)
+        .collect()
+    }
+
+    /// Reassign all events from `from` to `to` (for person merge).
+    pub fn reassign_events_to_person(
+        &self,
+        from: &PersonId,
+        to: &PersonId,
+    ) -> KinforgeResult<usize> {
+        self.conn
+            .execute(
+                "UPDATE events SET person_id = ?2 WHERE person_id = ?1",
+                params![from.as_str(), to.as_str()],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))
+    }
+
+    /// Reassign all relationships involving `from` to use `to` instead.
+    ///
+    /// Handles both sides of each relationship.  After reassigning, self-loops
+    /// (target ↔ target) and any rels that still point to `from` (duplicate
+    /// check prevented the move) are deleted.
+    pub fn reassign_relationships_to_person(
+        &self,
+        from: &PersonId,
+        to: &PersonId,
+    ) -> KinforgeResult<()> {
+        // Remove any existing rels between from and to — they'd become self-loops.
+        self.conn
+            .execute(
+                "DELETE FROM relationships
+                 WHERE (person1_id = ?1 AND person2_id = ?2)
+                    OR (person1_id = ?2 AND person2_id = ?1)",
+                params![from.as_str(), to.as_str()],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Reassign person1_id references.
+        self.conn
+            .execute(
+                "UPDATE relationships SET person1_id = ?2 WHERE person1_id = ?1",
+                params![from.as_str(), to.as_str()],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Reassign person2_id references.
+        self.conn
+            .execute(
+                "UPDATE relationships SET person2_id = ?2 WHERE person2_id = ?1",
+                params![from.as_str(), to.as_str()],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        // Delete any accidental self-loops.
+        self.conn
+            .execute(
+                "DELETE FROM relationships WHERE person1_id = person2_id",
+                [],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
     // ── Statistics ────────────────────────────────────────────────────────────
 
     pub fn stats(&self) -> KinforgeResult<DatabaseStats> {
