@@ -773,3 +773,124 @@ fn sources_report_renders() {
     assert!(report.contains("Orphan Source"));
     assert!(report.contains("1 citation") || report.contains("1")); // cited count
 }
+
+// ── Phase 6 tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn media_crud_roundtrip() {
+    use kinforge_core::models::MediaType;
+    let a = app();
+    let m = a
+        .add_media("Portrait 1880", MediaType::Photo, Some("/photos/p.jpg"), None, Some("A sepia portrait"), Some("1880"))
+        .unwrap();
+    assert_eq!(m.title, "Portrait 1880");
+    assert_eq!(m.media_type, MediaType::Photo);
+
+    let fetched = a.get_media(&m.id).unwrap();
+    assert_eq!(fetched.path, Some("/photos/p.jpg".to_string()));
+    assert_eq!(fetched.date, Some("1880".to_string()));
+
+    let all = a.list_media().unwrap();
+    assert_eq!(all.len(), 1);
+
+    a.delete_media(&m.id).unwrap();
+    assert!(a.get_media(&m.id).is_err());
+}
+
+#[test]
+fn media_attach_and_list_for_person() {
+    use kinforge_core::models::{MediaEntityType, MediaType};
+    let a = app();
+    let p = a.add_person(Some("Alice"), None, Sex::Female, None).unwrap();
+    let m = a.add_media("Wedding Photo", MediaType::Photo, None, None, None, None).unwrap();
+
+    let link = a.attach_media(&m.id, MediaEntityType::Person, &p.id.as_str()).unwrap();
+    let media_list = a.list_media_for_person(&p.id).unwrap();
+    assert_eq!(media_list.len(), 1);
+    assert_eq!(media_list[0].id, m.id);
+
+    // Detach
+    a.detach_media(&link.id).unwrap();
+    let media_list2 = a.list_media_for_person(&p.id).unwrap();
+    assert!(media_list2.is_empty());
+}
+
+#[test]
+fn media_attach_to_event() {
+    use kinforge_core::models::{MediaEntityType, MediaType};
+    let a = app();
+    let p = a.add_person(Some("Bob"), None, Sex::Male, None).unwrap();
+    let ev = a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    let m = a.add_media("Birth Record", MediaType::Document, None, None, None, None).unwrap();
+    a.attach_media(&m.id, MediaEntityType::Event, &ev.id.as_str()).unwrap();
+    let media = a.list_media_for_event(&ev.id).unwrap();
+    assert_eq!(media.len(), 1);
+}
+
+#[test]
+fn new_relationship_types_roundtrip() {
+    let a = app();
+    let adopter = a.add_person(Some("Emma"), None, Sex::Female, None).unwrap();
+    let child = a.add_person(Some("Lily"), None, Sex::Female, None).unwrap();
+    let godfather = a.add_person(Some("James"), None, Sex::Male, None).unwrap();
+
+    a.add_relationship(
+        RelationshipType::AdoptiveParent,
+        adopter.id.clone(),
+        child.id.clone(),
+        None,
+    ).unwrap();
+    a.add_relationship(
+        RelationshipType::Godparent,
+        godfather.id.clone(),
+        child.id.clone(),
+        None,
+    ).unwrap();
+
+    let rels = a.list_relationships_for_person(&child.id).unwrap();
+    assert_eq!(rels.len(), 2);
+    let types: Vec<_> = rels.iter().map(|r| r.rel_type.to_string()).collect();
+    assert!(types.contains(&"AdoptiveParent".to_string()));
+    assert!(types.contains(&"Godparent".to_string()));
+}
+
+#[test]
+fn check_integrity_detects_duplicate_people() {
+    let a = app();
+    a.add_person(Some("John"), Some("Smith"), Sex::Male, None).unwrap();
+    a.add_person(Some("John"), Some("Smith"), Sex::Male, None).unwrap();
+    let issues = a.check_integrity().unwrap();
+    let dupe_warnings: Vec<_> = issues
+        .iter()
+        .filter(|i| i.message.contains("duplicate") || i.message.contains("share the name"))
+        .collect();
+    assert!(!dupe_warnings.is_empty(), "expected duplicate person warning");
+}
+
+#[test]
+fn narrative_report_renders() {
+    use kinforge_reports::narrative_report;
+    let a = app();
+    let p = a.add_person(Some("Thomas"), Some("Edison"), Sex::Male, None).unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1847, 2, 11).unwrap())),
+        None,
+        None,
+    ).unwrap();
+    a.add_event(
+        p.id.clone(),
+        EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1931, 10, 18).unwrap())),
+        None,
+        None,
+    ).unwrap();
+
+    let report = narrative_report(&a.db, &p.id).unwrap();
+    assert!(report.contains("Thomas Edison"));
+    assert!(report.contains("born") || report.contains("Birth"));
+    assert!(report.contains("died") || report.contains("Death"));
+    assert!(report.contains("1847"));
+    assert!(report.contains("1931"));
+}

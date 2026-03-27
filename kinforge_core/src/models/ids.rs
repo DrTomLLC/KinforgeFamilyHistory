@@ -42,3 +42,5 @@ define_id!(EventId);
 define_id!(PlaceId);
 define_id!(SourceId);
 define_id!(CitationId);
+define_id!(MediaId);
+define_id!(MediaLinkId);

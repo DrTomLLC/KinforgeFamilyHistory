@@ -25,6 +25,11 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])?;
     }
 
+    if version < 2 {
+        conn.execute_batch(MIGRATION_2)?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])?;
+    }
+
     Ok(())
 }
 
@@ -98,4 +103,26 @@ CREATE INDEX IF NOT EXISTS idx_relationships_person1 ON relationships(person1_id
 CREATE INDEX IF NOT EXISTS idx_relationships_person2 ON relationships(person2_id);
 CREATE INDEX IF NOT EXISTS idx_citations_event_id ON citations(event_id);
 CREATE INDEX IF NOT EXISTS idx_citations_source_id ON citations(source_id);
+";
+
+const MIGRATION_2: &str = "
+CREATE TABLE IF NOT EXISTS media (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    path        TEXT,
+    url         TEXT,
+    media_type  TEXT NOT NULL DEFAULT 'Other',
+    description TEXT,
+    date        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS media_links (
+    id          TEXT PRIMARY KEY,
+    media_id    TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL,
+    entity_id   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_links_media_id ON media_links(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_links_entity ON media_links(entity_type, entity_id);
 ";

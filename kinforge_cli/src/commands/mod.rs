@@ -1,6 +1,7 @@
 pub mod check;
 pub mod citation;
 pub mod config;
+pub mod media;
 pub mod event;
 pub mod export;
 pub mod import;

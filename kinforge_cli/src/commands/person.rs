@@ -93,6 +93,22 @@ pub enum PersonCommands {
         #[arg(long)]
         notes: Option<String>,
     },
+    /// Record an adoptive-parent relationship
+    AddAdoptiveParent {
+        id: String,
+        #[arg(long)]
+        parent: String,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Record a godparent relationship
+    AddGodparent {
+        id: String,
+        #[arg(long)]
+        godparent: String,
+        #[arg(long)]
+        notes: Option<String>,
+    },
     /// Merge another person (--from) into this one, then delete the duplicate
     Merge {
         /// Target person: the one to keep (ID or short prefix)
@@ -371,6 +387,46 @@ pub fn handle(cmd: PersonCommands, app: &Application) -> Result<()> {
                 n1.bold(),
                 "\u{2194} spouse \u{2194}".bright_black(),
                 n2.bold()
+            );
+        }
+
+        PersonCommands::AddAdoptiveParent { id, parent, notes } => {
+            let child_id = app.resolve_person_id(&id)?;
+            let parent_id = app.resolve_person_id(&parent)?;
+            let child_name = app.get_person(&child_id)?.display_name();
+            let parent_name = app.get_person(&parent_id)?.display_name();
+            app.add_relationship(
+                kinforge_core::models::RelationshipType::AdoptiveParent,
+                parent_id,
+                child_id,
+                notes.as_deref(),
+            )?;
+            println!(
+                "{} {} {} {}",
+                "Linked:".green().bold(),
+                parent_name.bold(),
+                "\u{2192} adoptive parent of \u{2192}".bright_black(),
+                child_name.bold()
+            );
+        }
+
+        PersonCommands::AddGodparent { id, godparent, notes } => {
+            let child_id = app.resolve_person_id(&id)?;
+            let gp_id = app.resolve_person_id(&godparent)?;
+            let child_name = app.get_person(&child_id)?.display_name();
+            let gp_name = app.get_person(&gp_id)?.display_name();
+            app.add_relationship(
+                kinforge_core::models::RelationshipType::Godparent,
+                gp_id,
+                child_id,
+                notes.as_deref(),
+            )?;
+            println!(
+                "{} {} {} {}",
+                "Linked:".green().bold(),
+                gp_name.bold(),
+                "\u{2192} godparent of \u{2192}".bright_black(),
+                child_name.bold()
             );
         }
 

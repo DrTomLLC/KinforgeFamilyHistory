@@ -7,9 +7,9 @@ use std::path::PathBuf;
 mod commands;
 use commands::{
     citation::CitationCommands, config::ConfigCommands, event::EventCommands,
-    export::ExportCommands, import::ImportCommands, person::PersonCommands,
-    place::PlaceCommands, relationship::RelationshipCommands, report::ReportCommands,
-    search::SearchCommands, source::SourceCommands,
+    export::ExportCommands, import::ImportCommands, media::MediaCommands,
+    person::PersonCommands, place::PlaceCommands, relationship::RelationshipCommands,
+    report::ReportCommands, search::SearchCommands, source::SourceCommands,
 };
 
 #[derive(Parser)]
@@ -81,6 +81,10 @@ enum Commands {
     #[command(subcommand)]
     Search(SearchCommands),
 
+    /// Manage media attachments (photos, documents, audio, video)
+    #[command(subcommand)]
+    Media(MediaCommands),
+
     /// Manage configuration (show, init, set)
     #[command(subcommand)]
     Config(ConfigCommands),
@@ -122,6 +126,7 @@ fn main() -> Result<()> {
         Commands::Export(cmd) => commands::export::handle(cmd, &app)?,
         Commands::Import(cmd) => commands::import::handle(cmd, &app)?,
         Commands::Search(cmd) => commands::search::handle(cmd, &app)?,
+        Commands::Media(cmd) => commands::media::handle(cmd, &app)?,
         Commands::Check => commands::check::handle(&app)?,
         Commands::Config(_) => unreachable!(),
     }

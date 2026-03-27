@@ -1005,6 +1005,182 @@ impl Database {
             places,
         })
     }
+
+    // ── Media ────────────────────────────────────────────────────────────────
+
+    pub fn insert_media(&self, media: &Media) -> KinforgeResult<()> {
+        self.conn
+            .execute(
+                "INSERT INTO media (id, title, path, url, media_type, description, date)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    media.id.as_str(),
+                    media.title,
+                    media.path,
+                    media.url,
+                    media.media_type.to_string(),
+                    media.description,
+                    media.date,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_media(&self, media: &Media) -> KinforgeResult<()> {
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE media SET title=?2, path=?3, url=?4, media_type=?5, description=?6, date=?7
+                 WHERE id=?1",
+                params![
+                    media.id.as_str(),
+                    media.title,
+                    media.path,
+                    media.url,
+                    media.media_type.to_string(),
+                    media.description,
+                    media.date,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        if affected == 0 {
+            return Err(KinforgeError::NotFound {
+                entity_type: "Media".to_string(),
+                id: media.id.as_str(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn delete_media(&self, id: &MediaId) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM media WHERE id = ?1", params![id.as_str()])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_media(&self, id: &MediaId) -> KinforgeResult<Media> {
+        self.conn
+            .query_row(
+                "SELECT id, title, path, url, media_type, description, date FROM media WHERE id=?1",
+                params![id.as_str()],
+                Self::row_to_media,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => KinforgeError::NotFound {
+                    entity_type: "Media".to_string(),
+                    id: id.as_str(),
+                },
+                other => KinforgeError::Storage(other.to_string()),
+            })
+    }
+
+    pub fn list_media(&self) -> KinforgeResult<Vec<Media>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, title, path, url, media_type, description, date FROM media ORDER BY title",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], Self::row_to_media)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    fn row_to_media(row: &rusqlite::Row<'_>) -> rusqlite::Result<Media> {
+        let media_type_str: String = row.get(4)?;
+        let media_type = media_type_str.parse::<MediaType>().unwrap_or(MediaType::Other);
+        Ok(Media {
+            id: MediaId::from_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+            title: row.get(1)?,
+            path: row.get(2)?,
+            url: row.get(3)?,
+            media_type,
+            description: row.get(5)?,
+            date: row.get(6)?,
+        })
+    }
+
+    // ── Media Links ──────────────────────────────────────────────────────────
+
+    pub fn insert_media_link(&self, link: &MediaLink) -> KinforgeResult<()> {
+        self.conn
+            .execute(
+                "INSERT INTO media_links (id, media_id, entity_type, entity_id)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    link.id.as_str(),
+                    link.media_id.as_str(),
+                    link.entity_type.to_string(),
+                    link.entity_id,
+                ],
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn delete_media_link(&self, id: &MediaLinkId) -> KinforgeResult<()> {
+        self.conn
+            .execute("DELETE FROM media_links WHERE id=?1", params![id.as_str()])
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_media_links_for_media(&self, media_id: &MediaId) -> KinforgeResult<Vec<MediaLink>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, media_id, entity_type, entity_id
+                 FROM media_links WHERE media_id=?1",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![media_id.as_str()], Self::row_to_media_link)
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    pub fn list_media_for_entity(
+        &self,
+        entity_type: &MediaEntityType,
+        entity_id: &str,
+    ) -> KinforgeResult<Vec<Media>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT m.id, m.title, m.path, m.url, m.media_type, m.description, m.date
+                 FROM media m
+                 JOIN media_links ml ON ml.media_id = m.id
+                 WHERE ml.entity_type = ?1 AND ml.entity_id = ?2
+                 ORDER BY m.title",
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(
+                params![entity_type.to_string(), entity_id],
+                Self::row_to_media,
+            )
+            .map_err(|e| KinforgeError::Storage(e.to_string()))?;
+        rows.map(|r| r.map_err(|e| KinforgeError::Storage(e.to_string())))
+            .collect()
+    }
+
+    fn row_to_media_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaLink> {
+        let entity_type_str: String = row.get(2)?;
+        let entity_type = entity_type_str
+            .parse::<MediaEntityType>()
+            .unwrap_or(MediaEntityType::Person);
+        Ok(MediaLink {
+            id: MediaLinkId::from_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+            media_id: MediaId::from_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+            entity_type,
+            entity_id: row.get(3)?,
+        })
+    }
 }
 
 // ── Row helpers ───────────────────────────────────────────────────────────────

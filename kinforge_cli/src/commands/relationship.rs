@@ -109,13 +109,42 @@ pub fn handle(cmd: RelationshipCommands, app: &Application) -> Result<()> {
                         .map(|p| p.display_name())
                         .unwrap_or_else(|_| other_id.to_string());
                     let role = match &r.rel_type {
-                        RelationshipType::Spouse => "Spouse:    ",
-                        RelationshipType::Sibling => "Sibling:   ",
+                        RelationshipType::Spouse => "Spouse:      ",
+                        RelationshipType::Sibling => "Sibling:     ",
+                        RelationshipType::HalfSibling => "Half-sibling:",
                         RelationshipType::ParentChild => {
                             if r.person1_id == pid {
-                                "Parent of: "
+                                "Parent of:   "
                             } else {
-                                "Child of:  "
+                                "Child of:    "
+                            }
+                        }
+                        RelationshipType::AdoptiveParent => {
+                            if r.person1_id == pid {
+                                "Adopted:     "
+                            } else {
+                                "Adoptive par:"
+                            }
+                        }
+                        RelationshipType::Godparent => {
+                            if r.person1_id == pid {
+                                "Godparent of:"
+                            } else {
+                                "Godchild of: "
+                            }
+                        }
+                        RelationshipType::StepParent => {
+                            if r.person1_id == pid {
+                                "Step-parent: "
+                            } else {
+                                "Step-child:  "
+                            }
+                        }
+                        RelationshipType::Foster => {
+                            if r.person1_id == pid {
+                                "Fostered:    "
+                            } else {
+                                "Foster par:  "
                             }
                         }
                     };

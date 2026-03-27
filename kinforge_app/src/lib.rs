@@ -504,6 +504,48 @@ impl Application {
             }
         }
 
+        // Duplicate people: two people with the same given + surname (case-insensitive)
+        {
+            use std::collections::HashMap;
+            let all = self.db.list_people()?;
+            // Map normalised "given|surname" -> list of person IDs
+            let mut name_map: HashMap<String, Vec<String>> = HashMap::new();
+            for person in &all {
+                if let Some(name) = person.names.first() {
+                    let given = name
+                        .given
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let surname = name
+                        .surname
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if !given.is_empty() || !surname.is_empty() {
+                        let key = format!("{}|{}", given, surname);
+                        name_map.entry(key).or_default().push(person.id.to_string());
+                    }
+                }
+            }
+            for (key, ids) in &name_map {
+                if ids.len() > 1 {
+                    let parts: Vec<&str> = key.splitn(2, '|').collect();
+                    let display = format!("{} {}", parts[0], parts[1]).trim().to_string();
+                    issues.push(IntegrityIssue {
+                        severity: "warning",
+                        entity_type: "Person".to_string(),
+                        id: ids[0].clone(),
+                        message: format!(
+                            "possible duplicate: {} people share the name '{}' — consider `person merge`",
+                            ids.len(),
+                            display
+                        ),
+                    });
+                }
+            }
+        }
+
         Ok(issues)
     }
 
@@ -710,6 +752,101 @@ impl Application {
 
     pub fn list_all_citations(&self) -> KinforgeResult<Vec<Citation>> {
         self.db.list_all_citations()
+    }
+
+    // ── Media ────────────────────────────────────────────────────────────────
+
+    pub fn add_media(
+        &self,
+        title: &str,
+        media_type: MediaType,
+        path: Option<&str>,
+        url: Option<&str>,
+        description: Option<&str>,
+        date: Option<&str>,
+    ) -> KinforgeResult<Media> {
+        let mut m = Media::new(title, media_type);
+        m.path = path.map(|s| s.to_string());
+        m.url = url.map(|s| s.to_string());
+        m.description = description.map(|s| s.to_string());
+        m.date = date.map(|s| s.to_string());
+        self.db.insert_media(&m)?;
+        Ok(m)
+    }
+
+    pub fn update_media(&self, media: Media) -> KinforgeResult<Media> {
+        self.db.update_media(&media)?;
+        Ok(media)
+    }
+
+    pub fn delete_media(&self, id: &MediaId) -> KinforgeResult<()> {
+        self.db.delete_media(id)
+    }
+
+    pub fn get_media(&self, id: &MediaId) -> KinforgeResult<Media> {
+        self.db.get_media(id)
+    }
+
+    pub fn list_media(&self) -> KinforgeResult<Vec<Media>> {
+        self.db.list_media()
+    }
+
+    /// Attach a media record to a person, event, or source.
+    pub fn attach_media(
+        &self,
+        media_id: &MediaId,
+        entity_type: MediaEntityType,
+        entity_id: &str,
+    ) -> KinforgeResult<MediaLink> {
+        // Verify media exists
+        self.db.get_media(media_id)?;
+        let link = MediaLink::new(media_id.clone(), entity_type, entity_id);
+        self.db.insert_media_link(&link)?;
+        Ok(link)
+    }
+
+    pub fn detach_media(&self, link_id: &MediaLinkId) -> KinforgeResult<()> {
+        self.db.delete_media_link(link_id)
+    }
+
+    pub fn list_media_for_person(&self, person_id: &PersonId) -> KinforgeResult<Vec<Media>> {
+        self.db
+            .list_media_for_entity(&MediaEntityType::Person, &person_id.as_str())
+    }
+
+    pub fn list_media_for_event(&self, event_id: &EventId) -> KinforgeResult<Vec<Media>> {
+        self.db
+            .list_media_for_entity(&MediaEntityType::Event, &event_id.as_str())
+    }
+
+    pub fn list_media_links_for_media(
+        &self,
+        media_id: &MediaId,
+    ) -> KinforgeResult<Vec<MediaLink>> {
+        self.db.list_media_links_for_media(media_id)
+    }
+
+    /// Resolve a media ID from a full UUID or unambiguous prefix.
+    pub fn resolve_media_id(&self, input: &str) -> KinforgeResult<MediaId> {
+        if let Ok(id) = MediaId::from_str(input) {
+            return Ok(id);
+        }
+        let all = self.db.list_media()?;
+        let matches: Vec<_> = all
+            .iter()
+            .filter(|m| m.id.as_str().starts_with(input))
+            .collect();
+        match matches.len() {
+            1 => Ok(matches[0].id.clone()),
+            0 => Err(KinforgeError::NotFound {
+                entity_type: "Media".to_string(),
+                id: input.to_string(),
+            }),
+            _ => Err(KinforgeError::InvalidField {
+                field: "media_id".to_string(),
+                value: format!("prefix '{}' is ambiguous ({} matches)", input, matches.len()),
+            }),
+        }
     }
 }
 
