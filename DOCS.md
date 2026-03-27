@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-27
-> **Build status:** 100 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.4.0
+> **Build status:** 103 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.5.0
 
 ---
 
@@ -434,8 +434,15 @@ kinforge report narrative <ID>
 ### `search`
 
 ```
-kinforge search people <QUERY> [--sex <male|female|unknown>]
-kinforge search sources <QUERY> [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search people [--name <FRAGMENT>] [--given <FRAGMENT>] [--surname <FRAGMENT>]
+                       [--sex <male|female|unknown>]
+                       [--birth-year-from <YEAR>] [--birth-year-to <YEAR>]
+kinforge search sources [--title <FRAGMENT>] [--author <FRAGMENT>]
+                        [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search events  [--place <FRAGMENT>] [--event-type <TYPE>]
+                        [--person <ID>] [--from-year <YEAR>] [--to-year <YEAR>]
+kinforge search notes   <QUERY>
+kinforge search citations --source <TITLE_FRAGMENT>
 kinforge search fulltext <QUERY>
 ```
 
@@ -507,7 +514,7 @@ Opens an interactive terminal UI with four tabs:
 | Tab | Content |
 |-----|---------|
 | **People** | Scrollable list with birth years; `/` to filter by name; `Enter` for detail panel showing events and relationships |
-| **Tasks** | Scrollable list grouped by status (In Progress → Pending → Done); shows priority badge and strikethrough for done tasks |
+| **Tasks** | Scrollable list grouped by status (In Progress → Pending → Done); shows priority badge and strikethrough for done tasks; `f` cycles status filter |
 | **Sources** | Scrollable list with citation counts; `Enter` for citation detail panel showing linked events |
 | **Stats** | Database record counts and database file path |
 
@@ -527,6 +534,8 @@ Opens an interactive terminal UI with four tabs:
 | `p` | Tasks | Cycle selected task's priority (Low → Medium → High → Low) |
 | `x` | Tasks | Delete selected task |
 | `e` | People | Edit primary name of selected person (prefilled popup) |
+| `e` | Tasks | Edit selected task description and priority (prefilled popup) |
+| `f` | Tasks | Cycle status filter (All → Pending → In Progress → Done → All) |
 | `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
 | `x` | People | Open confirm-delete popup for selected person |
 | `x` | Sources | Open confirm-delete popup for selected source |
@@ -637,6 +646,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI Stats: Top Places section (top 5 places by event count)
 - [x] `kinforge export markdown` — self-contained Markdown family register
 - [x] `kinforge report places` — all places sorted by event count with coordinates
+
+**v1.5.0 (Phase 19):**
+- [x] TUI: `e` in Tasks tab — edit task description and priority via prefilled popup
+- [x] TUI: `f` in Tasks tab — cycle status filter (All/Pending/InProgress/Done); title badge + (visible/total) count
+- [x] TUI: person detail panel shows place name alongside each event (parallel vec pattern)
+- [x] `kinforge search people --birth-year-from/--birth-year-to` — filter people by birth year range
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

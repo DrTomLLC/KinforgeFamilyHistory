@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{InputMode, Tab, TaskRow, TuiState, TUI_EVENT_TYPES};
+use super::state::{InputMode, Tab, TaskRow, TaskStatusFilter, TuiState, TUI_EVENT_TYPES};
 use kinforge_core::models::{TaskPriority, TaskStatus};
 
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -347,18 +347,24 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        for event in &state.detail_events {
+        for (i, event) in state.detail_events.iter().enumerate() {
             let date_str = event
                 .date
                 .as_ref()
                 .map(|d| d.to_string())
                 .unwrap_or_else(|| "—".to_string());
+            let place_str = state.detail_event_places
+                .get(i)
+                .and_then(|p| p.as_deref())
+                .map(|p| format!("  @ {}", truncate(p, 20)))
+                .unwrap_or_default();
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {:<14}", truncate(&event.event_type.to_string(), 14)),
                     Style::default().fg(Color::Yellow),
                 ),
                 Span::raw(date_str),
+                Span::styled(place_str, Style::default().fg(Color::DarkGray)),
             ]));
         }
     }
@@ -498,17 +504,24 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
         list_state.select(Some(state.tasks_selected));
     }
 
-    let hint = if state.tasks.is_empty() {
-        String::new()
+    let filter_badge = if state.task_status_filter != TaskStatusFilter::All {
+        format!("  [{}]", state.task_status_filter.label())
     } else {
-        "  d/c: mark done".to_string()
+        String::new()
     };
+    let visible_count = state.task_rows.iter().filter(|r| matches!(r, TaskRow::Item(_))).count();
+    let title = format!(
+        " Research Tasks ({}/{}){} ",
+        visible_count,
+        state.tasks.len(),
+        filter_badge
+    );
 
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Research Tasks ({}){} ", state.tasks.len(), hint)),
+                .title(title),
         )
         .highlight_style(
             Style::default()
@@ -519,9 +532,12 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
 
     frame.render_stateful_widget(list, area, &mut list_state);
 
-    // Render task-create popup on top when active
+    // Render popups on top
     if state.mode == InputMode::TaskCreate {
         draw_task_create_popup(frame, state, area);
+    }
+    if state.mode == InputMode::TaskEdit {
+        draw_task_edit_popup(frame, state, area);
     }
 }
 
@@ -541,6 +557,53 @@ fn draw_task_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(" New Task — Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_task_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 60_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 2;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 5 };
+
+    let prio_labels = ["Low ◄", "Medium", "► High"];
+    let prio_label = prio_labels[state.task_edit_priority_idx];
+
+    let cursor = "_";
+    let desc_text = if state.task_edit_field == 0 {
+        format!("{}{}", state.task_edit_desc, cursor)
+    } else {
+        state.task_edit_desc.clone()
+    };
+    let prio_text = if state.task_edit_field == 1 {
+        format!("◄ {} ►", prio_labels[state.task_edit_priority_idx])
+    } else {
+        prio_label.to_string()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Desc:     ", Style::default().fg(Color::Cyan)),
+            Span::styled(desc_text, if state.task_edit_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Priority: ", Style::default().fg(Color::Cyan)),
+            Span::styled(prio_text, if state.task_edit_field == 1 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Task — Tab: switch · ←/→: priority · Enter: save · Esc: cancel ")
             .border_style(Style::default().fg(Color::Yellow)),
     );
 
@@ -854,6 +917,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
             state.filtered_people.len()
         ),
         InputMode::TaskCreate => " Type task description  Enter: save  Esc: cancel".to_string(),
+        InputMode::TaskEdit => " Tab: switch field  ←/→: priority  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::SourceCreate => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
@@ -868,7 +932,7 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
                         .to_string()
                 }
             }
-            Tab::Tasks => " Tab: next  ↑↓/jk: navigate  g/G: top/bottom  n: new  d/c: done  p: priority  x: delete  q: quit".to_string(),
+            Tab::Tasks => " Tab: next  ↑↓/jk  g/G  n: new  e: edit  d/c: done  p: priority  x: delete  f: filter  q: quit".to_string(),
             Tab::Sources => {
                 if state.source_detail_open {
                     " ESC/Enter: close  ↑↓/jk: scroll  Tab: next  q: quit".to_string()

@@ -1,7 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use kinforge_core::models::{PersonId, SourceId, TaskId};
 
-use super::state::{first_task_item_idx, InputMode, Tab, TaskRow, TuiState, TUI_EVENT_TYPES};
+use super::state::{
+    build_filtered_task_rows, first_task_item_idx, InputMode, Tab, TaskRow,
+    TuiState, TUI_EVENT_TYPES,
+};
 
 pub enum Action {
     None,
@@ -18,6 +21,7 @@ pub enum Action {
     DeletePerson(PersonId),
     CreateEvent(PersonId, String, String, String), // (person_id, type_name, date_str, place_str)
     DeleteSource(SourceId),
+    EditTask(TaskId, String, kinforge_core::models::TaskPriority),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -40,6 +44,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::SourceCreate => handle_source_create(state, key),
         InputMode::ConfirmDelete => handle_confirm_delete(state, key),
         InputMode::EventCreate => handle_event_create(state, key),
+        InputMode::TaskEdit => handle_task_edit(state, key),
     }
 }
 
@@ -320,6 +325,31 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Edit task: press 'e' in Tasks tab
+        KeyCode::Char('e') if state.active_tab == Tab::Tasks => {
+            if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+                let task = &state.tasks[*idx];
+                state.task_edit_desc = task.description.clone();
+                state.task_edit_priority_idx = match task.priority {
+                    kinforge_core::models::TaskPriority::Low => 0,
+                    kinforge_core::models::TaskPriority::Medium => 1,
+                    kinforge_core::models::TaskPriority::High => 2,
+                };
+                state.task_edit_id = Some(task.id.clone());
+                state.task_edit_field = 0;
+                state.mode = InputMode::TaskEdit;
+            }
+            Action::None
+        }
+
+        // Filter tasks by status: press 'f' in Tasks tab
+        KeyCode::Char('f') if state.active_tab == Tab::Tasks => {
+            state.task_status_filter = state.task_status_filter.next();
+            state.task_rows = build_filtered_task_rows(&state.tasks, state.task_status_filter);
+            state.tasks_selected = first_task_item_idx(&state.task_rows);
+            Action::None
+        }
+
         // Cycle task priority: press 'p' on a task
         KeyCode::Char('p') if state.active_tab == Tab::Tasks => {
             if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
@@ -540,6 +570,49 @@ fn handle_source_create(state: &mut TuiState, key: KeyEvent) -> Action {
             } else {
                 state.source_create_author.push(c);
             }
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_task_edit(state: &mut TuiState, key: KeyEvent) -> Action {
+    use kinforge_core::models::TaskPriority;
+    const PRIOS: [TaskPriority; 3] = [TaskPriority::Low, TaskPriority::Medium, TaskPriority::High];
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.task_edit_id = None;
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            state.task_edit_field = 1 - state.task_edit_field;
+        }
+        // Left/Right cycle priority when on field 1
+        KeyCode::Left if state.task_edit_field == 1 => {
+            state.task_edit_priority_idx =
+                state.task_edit_priority_idx.saturating_sub(1);
+        }
+        KeyCode::Right if state.task_edit_field == 1 => {
+            if state.task_edit_priority_idx < 2 {
+                state.task_edit_priority_idx += 1;
+            }
+        }
+        KeyCode::Enter => {
+            let desc = state.task_edit_desc.trim().to_string();
+            let priority = PRIOS[state.task_edit_priority_idx].clone();
+            if let Some(tid) = state.task_edit_id.take() {
+                state.mode = InputMode::Normal;
+                if !desc.is_empty() {
+                    return Action::EditTask(tid, desc, priority);
+                }
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace if state.task_edit_field == 0 => {
+            state.task_edit_desc.pop();
+        }
+        KeyCode::Char(c) if state.task_edit_field == 0 => {
+            state.task_edit_desc.push(c);
         }
         _ => {}
     }

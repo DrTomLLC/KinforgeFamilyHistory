@@ -53,6 +53,7 @@ pub enum InputMode {
     Normal,
     Search,
     TaskCreate,
+    TaskEdit,
     PersonCreate,
     PersonEdit,
     SourceCreate,
@@ -79,6 +80,35 @@ impl SortOrder {
         match self {
             SortOrder::Name => "name",
             SortOrder::BirthYear => "birth yr",
+        }
+    }
+}
+
+// ── TaskStatusFilter ──────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatusFilter {
+    All,
+    Pending,
+    InProgress,
+    Done,
+}
+
+impl TaskStatusFilter {
+    pub fn next(self) -> Self {
+        match self {
+            TaskStatusFilter::All => TaskStatusFilter::Pending,
+            TaskStatusFilter::Pending => TaskStatusFilter::InProgress,
+            TaskStatusFilter::InProgress => TaskStatusFilter::Done,
+            TaskStatusFilter::Done => TaskStatusFilter::All,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            TaskStatusFilter::All => "all",
+            TaskStatusFilter::Pending => "pending",
+            TaskStatusFilter::InProgress => "in progress",
+            TaskStatusFilter::Done => "done",
         }
     }
 }
@@ -124,6 +154,7 @@ pub struct TuiState {
     pub detail_open: bool,
     pub detail_person_id: Option<PersonId>,
     pub detail_events: Vec<Event>,
+    pub detail_event_places: Vec<Option<String>>, // parallel to detail_events
     pub detail_rel_rows: Vec<(String, String)>, // (label, other name)
     pub detail_scroll: usize,
     pub detail_notes: Option<String>,
@@ -133,6 +164,7 @@ pub struct TuiState {
     pub tasks: Vec<Task>,
     pub task_rows: Vec<TaskRow>,
     pub tasks_selected: usize,
+    pub task_status_filter: TaskStatusFilter,
 
     // Sources list
     pub sources: Vec<SourceRow>,
@@ -167,6 +199,12 @@ pub struct TuiState {
 
     // Inline task creation
     pub task_create_buf: String,
+
+    // Inline task edit
+    pub task_edit_desc: String,
+    pub task_edit_priority_idx: usize, // 0=Low, 1=Medium, 2=High
+    pub task_edit_id: Option<TaskId>,
+    pub task_edit_field: u8, // 0 = description, 1 = priority
 
     // Inline person creation
     pub person_create_given: String,
@@ -221,7 +259,7 @@ impl TuiState {
 
         // Load tasks
         let tasks = app.list_tasks().unwrap_or_default();
-        let task_rows = build_task_rows(&tasks);
+        let task_rows = build_filtered_task_rows(&tasks, TaskStatusFilter::All);
         let first_task = first_task_item_idx(&task_rows);
         let tasks_pending = tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
         let tasks_in_progress = tasks.iter().filter(|t| t.status == TaskStatus::InProgress).count();
@@ -244,6 +282,7 @@ impl TuiState {
             detail_open: false,
             detail_person_id: None,
             detail_events: vec![],
+            detail_event_places: vec![],
             detail_rel_rows: vec![],
             detail_scroll: 0,
             detail_notes: None,
@@ -251,6 +290,7 @@ impl TuiState {
             tasks,
             task_rows,
             tasks_selected: first_task,
+            task_status_filter: TaskStatusFilter::All,
             sources,
             sources_selected: 0,
             source_detail_open: false,
@@ -269,6 +309,10 @@ impl TuiState {
             confirm_source_id: None,
             top_places: load_top_places(app),
             task_create_buf: String::new(),
+            task_edit_desc: String::new(),
+            task_edit_priority_idx: 1,
+            task_edit_id: None,
+            task_edit_field: 0,
             person_create_given: String::new(),
             person_create_surname: String::new(),
             person_create_field: 0,
@@ -327,7 +371,7 @@ impl TuiState {
     /// Reload tasks from the DB and rebuild the row list.
     pub fn reload_tasks(&mut self, app: &Application) {
         self.tasks = app.list_tasks().unwrap_or_default();
-        self.task_rows = build_task_rows(&self.tasks);
+        self.task_rows = build_filtered_task_rows(&self.tasks, self.task_status_filter);
         self.tasks_pending = self.tasks.iter().filter(|t| t.status == TaskStatus::Pending).count();
         self.tasks_in_progress = self.tasks.iter().filter(|t| t.status == TaskStatus::InProgress).count();
         self.tasks_done = self.tasks.iter().filter(|t| t.status == TaskStatus::Done).count();
@@ -383,6 +427,31 @@ impl TuiState {
     pub fn reload_top_places(&mut self, app: &Application) {
         self.top_places = load_top_places(app);
     }
+}
+
+/// Build task rows respecting the active status filter.
+pub fn build_filtered_task_rows(tasks: &[Task], filter: TaskStatusFilter) -> Vec<TaskRow> {
+    let filtered: Vec<(usize, &Task)> = tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| match filter {
+            TaskStatusFilter::All => true,
+            TaskStatusFilter::Pending => t.status == TaskStatus::Pending,
+            TaskStatusFilter::InProgress => t.status == TaskStatus::InProgress,
+            TaskStatusFilter::Done => t.status == TaskStatus::Done,
+        })
+        .collect();
+
+    if filter != TaskStatusFilter::All {
+        // Flat list when filtering — no section headers
+        return filtered
+            .into_iter()
+            .map(|(idx, _)| TaskRow::Item(idx))
+            .collect();
+    }
+
+    // Full grouped display
+    build_task_rows(tasks)
 }
 
 pub fn build_task_rows(tasks: &[Task]) -> Vec<TaskRow> {

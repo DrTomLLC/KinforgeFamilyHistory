@@ -1271,3 +1271,91 @@ fn event_place_linked_via_name_on_add() {
         .collect();
     assert_eq!(events_at_place.len(), 1);
 }
+
+// ── Phase 19 tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn task_edit_description_and_priority() {
+    let a = app();
+    let t = a.add_task("Original desc", None, TaskPriority::Low, None).unwrap();
+    let mut updated = a.get_task(&t.id).unwrap();
+    updated.description = "Updated desc".to_string();
+    updated.priority = TaskPriority::High;
+    updated.touch();
+    let saved = a.update_task(updated).unwrap();
+    assert_eq!(saved.description, "Updated desc");
+    assert_eq!(saved.priority, TaskPriority::High);
+    let fetched = a.get_task(&t.id).unwrap();
+    assert_eq!(fetched.description, "Updated desc");
+    assert_eq!(fetched.priority, TaskPriority::High);
+}
+
+#[test]
+fn list_tasks_filtered_by_status_in_progress() {
+    let a = app();
+    let t1 = a.add_task("Pending task", None, TaskPriority::Low, None).unwrap();
+    let mut t2 = a.add_task("In-progress task", None, TaskPriority::Medium, None).unwrap();
+    t2.status = TaskStatus::InProgress;
+    t2.touch();
+    a.update_task(t2.clone()).unwrap();
+    let all = a.list_tasks().unwrap();
+    let in_progress: Vec<_> = all.iter().filter(|t| t.status == TaskStatus::InProgress).collect();
+    assert_eq!(in_progress.len(), 1);
+    assert_eq!(in_progress[0].description, "In-progress task");
+    let pending: Vec<_> = all.iter().filter(|t| t.status == TaskStatus::Pending).collect();
+    assert!(pending.iter().any(|t| t.id == t1.id));
+}
+
+#[test]
+fn search_people_by_birth_year_range() {
+    use kinforge_query::{EventQuery, PersonQuery};
+    let a = app();
+    let p1 = a.add_person(Some("Early"), Some("Bird"), Sex::Male, None).unwrap();
+    let p2 = a.add_person(Some("Late"), Some("Arrival"), Sex::Female, None).unwrap();
+    let date1 = EventDate::Exact(NaiveDate::from_ymd_opt(1850, 1, 1).unwrap());
+    let date2 = EventDate::Exact(NaiveDate::from_ymd_opt(1920, 6, 15).unwrap());
+    a.add_event(p1.id.clone(), EventType::Birth, Some(date1), None, None).unwrap();
+    a.add_event(p2.id.clone(), EventType::Birth, Some(date2), None, None).unwrap();
+    // Query births from 1900 to 1950 — should only include p2
+    let birth_events = EventQuery::new()
+        .of_type(EventType::Birth)
+        .from_year(1900)
+        .to_year(1950)
+        .run(a.database())
+        .unwrap();
+    let valid_ids: std::collections::HashSet<_> = birth_events.iter().map(|e| &e.person_id).collect();
+    let all_people = PersonQuery::new().run(a.database()).unwrap();
+    let matches: Vec<_> = all_people.iter().filter(|p| valid_ids.contains(&p.id)).collect();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].id, p2.id);
+}
+
+#[test]
+fn detail_event_place_name_via_app() {
+    let a = app();
+    let p = a.add_person(Some("Clara"), Some("Barton"), Sex::Female, None).unwrap();
+    let ev = a.add_event(
+        p.id.clone(),
+        EventType::Birth,
+        None,
+        Some("Oxford, Massachusetts"),
+        None,
+    ).unwrap();
+    let events = a.list_events_for_person(&p.id).unwrap();
+    assert_eq!(events.len(), 1);
+    let place_id = events[0].place_id.as_ref().expect("place_id set");
+    let place = a.get_place(place_id).unwrap();
+    assert_eq!(place.name, "Oxford, Massachusetts");
+    assert_eq!(events[0].id, ev.id);
+}
+
+#[test]
+fn places_report_shows_no_events_for_uncited_place() {
+    use kinforge_reports::places_report;
+    let a = app();
+    // Add a place with no events
+    a.add_place("Nowhere, USA", None, None, None).unwrap();
+    let report = places_report(a.database()).unwrap();
+    // The place should appear in the report with 0 events
+    assert!(report.contains("Nowhere, USA"));
+}

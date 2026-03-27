@@ -45,8 +45,13 @@ fn run(
                     events::Action::Quit => break,
 
                     events::Action::OpenPersonDetail(pid) => {
-                        state.detail_events =
-                            app.list_events_for_person(&pid).unwrap_or_default();
+                        let evts = app.list_events_for_person(&pid).unwrap_or_default();
+                        state.detail_event_places = evts.iter()
+                            .map(|e| e.place_id.as_ref()
+                                .and_then(|pid| app.get_place(pid).ok())
+                                .map(|pl| pl.name))
+                            .collect();
+                        state.detail_events = evts;
                         state.detail_rel_rows =
                             build_person_rel_rows(app, &pid, &state.people);
                         state.detail_notes = app.get_person(&pid).ok()
@@ -158,8 +163,24 @@ fn run(
                         let place = if place_str.is_empty() { None } else { Some(place_str.as_str()) };
                         let _ = app.add_event(pid.clone(), event_type, date, place, None);
                         // Refresh detail panel and stats
-                        state.detail_events = app.list_events_for_person(&pid).unwrap_or_default();
+                        let evts = app.list_events_for_person(&pid).unwrap_or_default();
+                        state.detail_event_places = evts.iter()
+                            .map(|e| e.place_id.as_ref()
+                                .and_then(|plid| app.get_place(plid).ok())
+                                .map(|pl| pl.name))
+                            .collect();
+                        state.detail_events = evts;
                         state.reload_top_places(app);
+                    }
+
+                    events::Action::EditTask(tid, desc, priority) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.description = desc;
+                            task.priority = priority;
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
                     }
 
                     events::Action::None => {}
