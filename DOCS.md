@@ -688,6 +688,14 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
 
+**v1.10.0 (Phase 24):**
+- [x] TUI: `J`/`K` in person detail panel — move relationship cursor; selected relationship highlighted with `»`
+- [x] TUI: `X` in person detail — delete selected relationship (confirm popup)
+- [x] TUI: `s` in Tasks tab — start a Pending task (sets status to InProgress)
+- [x] `kinforge report missing-data` — lists people with no birth date, unknown sex, or no events
+- [x] `kinforge report surnames` — surname frequency table with birth-decade ranges
+- [x] Integration tests: 102 total (97 → 102)
+
 **v1.9.0 (Phase 23):**
 - [x] TUI: `↑`/`↓` in person detail panel selects individual events; selected event highlighted
 - [x] TUI: `E` in person detail — edit selected event (type, date, place; prefilled popup)

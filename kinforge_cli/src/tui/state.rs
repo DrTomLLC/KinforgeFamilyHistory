@@ -169,11 +169,12 @@ pub struct TuiState {
     pub detail_person_id: Option<PersonId>,
     pub detail_events: Vec<Event>,
     pub detail_event_places: Vec<Option<String>>, // parallel to detail_events
-    pub detail_rel_rows: Vec<(String, String)>, // (label, other name)
+    pub detail_rel_rows: Vec<(String, String, RelationshipId)>, // (label, other name, rel_id)
     pub detail_scroll: usize,
     pub detail_notes: Option<String>,
     pub detail_media_count: usize,
     pub detail_event_cursor: usize, // which event is "selected" in the detail panel
+    pub detail_rel_cursor: usize,   // which relationship is "selected"
 
     // Tasks list
     pub tasks: Vec<Task>,
@@ -206,10 +207,11 @@ pub struct TuiState {
     // People sort order
     pub sort_order: SortOrder,
 
-    // Delete confirmation (person or source)
+    // Delete confirmation (person, source, event, or relationship)
     pub confirm_name: String,
     pub confirm_person_id: Option<PersonId>,
     pub confirm_source_id: Option<SourceId>,
+    pub confirm_rel_id: Option<RelationshipId>,
 
     // Top places by event count (for Stats tab)
     pub top_places: Vec<(String, usize)>, // (place name, event count)
@@ -336,6 +338,7 @@ impl TuiState {
             detail_notes: None,
             detail_media_count: 0,
             detail_event_cursor: 0,
+            detail_rel_cursor: 0,
             tasks,
             task_rows,
             tasks_selected: first_task,
@@ -358,6 +361,7 @@ impl TuiState {
             confirm_name: String::new(),
             confirm_person_id: None,
             confirm_source_id: None,
+            confirm_rel_id: None,
             top_places: load_top_places(app),
             task_create_buf: String::new(),
             task_edit_desc: String::new(),

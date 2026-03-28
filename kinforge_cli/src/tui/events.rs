@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use kinforge_core::models::{EventId, PersonId, Sex, SourceId, TaskId};
+use kinforge_core::models::{EventId, PersonId, RelationshipId, Sex, SourceId, TaskId};
 
 use super::state::{
     build_filtered_task_rows, first_task_item_idx, InputMode, Tab, TaskRow,
@@ -27,6 +27,8 @@ pub enum Action {
     UpdatePersonNotes(PersonId, String),                // (id, notes text)
     EditEvent(EventId, String, String, String),         // (id, type_name, date_str, place_str)
     DeleteEvent(EventId),
+    DeleteRelationship(RelationshipId),
+    StartTask(TaskId),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -383,6 +385,38 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Move relationship cursor up: press 'J' in People detail
+        KeyCode::Char('J') if state.active_tab == Tab::People && state.detail_open => {
+            if !state.detail_rel_rows.is_empty() {
+                let max = state.detail_rel_rows.len() - 1;
+                if state.detail_rel_cursor < max {
+                    state.detail_rel_cursor += 1;
+                }
+            }
+            Action::None
+        }
+
+        // Move relationship cursor up: press 'K' in People detail
+        KeyCode::Char('K') if state.active_tab == Tab::People && state.detail_open => {
+            state.detail_rel_cursor = state.detail_rel_cursor.saturating_sub(1);
+            Action::None
+        }
+
+        // Delete selected relationship: press 'X' in People detail
+        KeyCode::Char('X') if state.active_tab == Tab::People && state.detail_open => {
+            let idx = state.detail_rel_cursor;
+            if let Some((label, other_name, rid)) = state.detail_rel_rows.get(idx) {
+                let display = format!("{} {}", label, other_name);
+                state.confirm_name = display;
+                state.confirm_rel_id = Some(rid.clone());
+                state.confirm_person_id = None;
+                state.confirm_source_id = None;
+                state.confirm_event_id = None;
+                state.mode = InputMode::ConfirmDelete;
+            }
+            Action::None
+        }
+
         // Edit person notes: press 'N' in People tab (list or detail)
         KeyCode::Char('N') if state.active_tab == Tab::People => {
             let pid = if state.detail_open {
@@ -486,6 +520,17 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
                 let task = &state.tasks[*idx];
                 return Action::DeleteTask(task.id.clone());
+            }
+            Action::None
+        }
+
+        // Start task (set InProgress): press 's' on a task
+        KeyCode::Char('s') if state.active_tab == Tab::Tasks => {
+            if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+                let task = &state.tasks[*idx];
+                if task.status == kinforge_core::models::TaskStatus::Pending {
+                    return Action::StartTask(task.id.clone());
+                }
             }
             Action::None
         }
@@ -694,11 +739,15 @@ fn handle_confirm_delete(state: &mut TuiState, key: KeyEvent) -> Action {
             if let Some(eid) = state.confirm_event_id.take() {
                 return Action::DeleteEvent(eid);
             }
+            if let Some(rid) = state.confirm_rel_id.take() {
+                return Action::DeleteRelationship(rid);
+            }
         }
         _ => {
             state.confirm_person_id = None;
             state.confirm_source_id = None;
             state.confirm_event_id = None;
+            state.confirm_rel_id = None;
             state.confirm_name.clear();
             state.mode = InputMode::Normal;
         }

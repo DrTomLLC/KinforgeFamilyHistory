@@ -541,11 +541,18 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        for (label, other_name) in &state.detail_rel_rows {
+        for (i, (label, other_name, _rid)) in state.detail_rel_rows.iter().enumerate() {
+            let is_selected = i == state.detail_rel_cursor;
+            let prefix = if is_selected { "» " } else { "  " };
+            let label_style = if is_selected {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Magenta)
+            };
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {:<18}", truncate(label, 18)),
-                    Style::default().fg(Color::Magenta),
+                    format!("{}{:<18}", prefix, truncate(label, 18)),
+                    label_style,
                 ),
                 Span::raw(other_name.as_str()),
             ]));

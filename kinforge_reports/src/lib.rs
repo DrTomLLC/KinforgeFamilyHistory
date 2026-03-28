@@ -1538,3 +1538,143 @@ pub fn birthdays_report(db: &Database) -> KinforgeResult<String> {
 
     Ok(out)
 }
+
+// ─── missing data report ────────────────────────────────────────────────────
+
+/// People missing key genealogical data: no birth date, unknown sex, or no
+/// events at all.
+pub fn missing_data_report(db: &Database) -> KinforgeResult<String> {
+    let people = db.list_people()?;
+
+    struct Row {
+        name: String,
+        issues: Vec<&'static str>,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id).unwrap_or_default();
+        let mut issues: Vec<&'static str> = Vec::new();
+
+        if events.is_empty() {
+            issues.push("no events");
+        } else {
+            let has_birth_date = events.iter().any(|e| {
+                matches!(e.event_type, EventType::Birth) && e.date.is_some()
+            });
+            if !has_birth_date {
+                issues.push("no birth date");
+            }
+        }
+
+        if matches!(person.sex, Sex::Unknown) {
+            issues.push("unknown sex");
+        }
+
+        if !issues.is_empty() {
+            rows.push(Row { name: person.display_name(), issues });
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Missing Data ({} people with gaps)  ", rows.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(42).bright_black()
+    ));
+
+    if rows.is_empty() {
+        out.push_str(&format!("  {}\n", "All people have complete data.".green()));
+        return Ok(out);
+    }
+
+    for row in &rows {
+        let issues_str = row.issues.join(", ");
+        out.push_str(&format!(
+            "  {}  {}\n",
+            row.name.bold(),
+            issues_str.yellow()
+        ));
+    }
+
+    Ok(out)
+}
+
+// ─── surnames report ────────────────────────────────────────────────────────
+
+/// Surname frequency analysis with decade ranges of birth years.
+pub fn surnames_report(db: &Database) -> KinforgeResult<String> {
+    use chrono::Datelike;
+    use std::collections::HashMap;
+
+    let people = db.list_people()?;
+
+    // surname → (count, birth years) — count is people, years for decade range
+    let mut surname_data: HashMap<String, (usize, Vec<i32>)> = HashMap::new();
+
+    for person in &people {
+        let surname = person.names.first()
+            .and_then(|n| n.surname.as_deref())
+            .map(|s| s.to_string());
+
+        if let Some(sn) = surname {
+            if sn.is_empty() { continue; }
+            let events = db.list_events_for_person(&person.id).unwrap_or_default();
+            let birth_year: Option<i32> = events.iter()
+                .find(|e| matches!(e.event_type, EventType::Birth))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                    _ => None,
+                });
+            let entry = surname_data.entry(sn).or_default();
+            entry.0 += 1;
+            if let Some(y) = birth_year {
+                entry.1.push(y);
+            }
+        }
+    }
+
+    // sort by frequency desc, then name asc
+    let mut surnames: Vec<(&String, &(usize, Vec<i32>))> = surname_data.iter().collect();
+    surnames.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(a.0.cmp(b.0)));
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Surnames ({} distinct)  ", surnames.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(36).bright_black()
+    ));
+
+    if surnames.is_empty() {
+        out.push_str(&format!("  {}\n", "(no surnames recorded)".bright_black()));
+        return Ok(out);
+    }
+
+    for (surname, (count, years)) in &surnames {
+        let decade_range = if years.is_empty() {
+            String::new()
+        } else {
+            let min_d = (years.iter().min().unwrap() / 10) * 10;
+            let max_d = (years.iter().max().unwrap() / 10) * 10;
+            if min_d == max_d {
+                format!("  {}s", min_d.to_string().bright_black())
+            } else {
+                format!("  {}s\u{2013}{}s",
+                    min_d.to_string().bright_black(),
+                    max_d.to_string().bright_black())
+            }
+        };
+        out.push_str(&format!(
+            "  {:>4}  {}{}\n",
+            count.to_string().yellow().bold(),
+            surname.bold(),
+            decade_range
+        ));
+    }
+
+    Ok(out)
+}

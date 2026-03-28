@@ -6,8 +6,9 @@ use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
     ancestor_report, birthdays_report, census_report, descendant_report, family_group_sheet,
-    global_timeline_report, individual_report, narrative_report, people_list_report,
-    places_report, sources_report, summary_report, timeline_report,
+    global_timeline_report, individual_report, missing_data_report, narrative_report,
+    people_list_report, places_report, sources_report, summary_report, surnames_report,
+    timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 use std::collections::HashMap;
@@ -79,6 +80,10 @@ pub enum ReportCommands {
     Birthdays,
     /// US census snapshots (1790–1940) — people likely alive at each census year
     Census,
+    /// People missing key data: no birth date, unknown sex, or no events
+    MissingData,
+    /// Surname frequency table with birth-decade ranges
+    Surnames,
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -251,6 +256,12 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         }
         ReportCommands::Census => {
             print!("{}", census_report(app.database())?);
+        }
+        ReportCommands::MissingData => {
+            print!("{}", missing_data_report(app.database())?);
+        }
+        ReportCommands::Surnames => {
+            print!("{}", surnames_report(app.database())?);
         }
     }
     Ok(())

@@ -271,6 +271,25 @@ fn run(
                         }
                     }
 
+                    events::Action::DeleteRelationship(rid) => {
+                        let _ = app.delete_relationship(&rid);
+                        if let Some(ref pid) = state.detail_person_id.clone() {
+                            state.detail_rel_rows =
+                                build_person_rel_rows(app, pid, &state.people);
+                            state.detail_rel_cursor = state.detail_rel_cursor
+                                .min(state.detail_rel_rows.len().saturating_sub(1));
+                        }
+                    }
+
+                    events::Action::StartTask(tid) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.status = kinforge_core::models::TaskStatus::InProgress;
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
+                    }
+
                     events::Action::None => {}
                 }
             }
@@ -288,7 +307,7 @@ fn build_person_rel_rows(
     app: &Application,
     focused_pid: &kinforge_core::models::PersonId,
     people_cache: &[state::PersonRow],
-) -> Vec<(String, String)> {
+) -> Vec<(String, String, kinforge_core::models::RelationshipId)> {
     let rels = app
         .list_relationships_for_person(focused_pid)
         .unwrap_or_default();
@@ -296,11 +315,7 @@ fn build_person_rel_rows(
     rels.into_iter()
         .map(|rel| {
             let is_person1 = &rel.person1_id == focused_pid;
-            let other_id = if is_person1 {
-                &rel.person2_id
-            } else {
-                &rel.person1_id
-            };
+            let other_id = if is_person1 { &rel.person2_id } else { &rel.person1_id };
 
             let other_name = people_cache
                 .iter()
@@ -324,7 +339,7 @@ fn build_person_rel_rows(
                 (RelationshipType::Foster, false) => "Foster child of",
             };
 
-            (label.to_string(), other_name)
+            (label.to_string(), other_name, rel.id.clone())
         })
         .collect()
 }

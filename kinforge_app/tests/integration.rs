@@ -1682,3 +1682,70 @@ fn census_report_includes_person_born_before_census() {
         assert!(pl < p70, "Lincoln should not appear in 1870 census");
     }
 }
+
+// ── Phase 24 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn delete_relationship_removes_from_person_rels() {
+    let a = app();
+    let p1 = a.add_person(Some("George"), Some("Washington"), Sex::Male, None).unwrap();
+    let p2 = a.add_person(Some("Martha"), Some("Washington"), Sex::Female, None).unwrap();
+    let rel = a.add_relationship(RelationshipType::Spouse, p1.id.clone(), p2.id.clone(), None).unwrap();
+    assert_eq!(a.list_relationships_for_person(&p1.id).unwrap().len(), 1);
+    a.delete_relationship(&rel.id).unwrap();
+    assert_eq!(a.list_relationships_for_person(&p1.id).unwrap().len(), 0);
+}
+
+#[test]
+fn task_start_sets_in_progress() {
+    let a = app();
+    let task = a.add_task("Test task", None, TaskPriority::Medium, None).unwrap();
+    assert!(matches!(task.status, TaskStatus::Pending));
+    let mut t = a.get_task(&task.id).unwrap();
+    t.status = TaskStatus::InProgress;
+    t.touch();
+    a.update_task(t).unwrap();
+    let updated = a.get_task(&task.id).unwrap();
+    assert!(matches!(updated.status, TaskStatus::InProgress));
+}
+
+#[test]
+fn missing_data_report_flags_no_birth_date() {
+    use kinforge_reports::missing_data_report;
+    let a = app();
+    let p = a.add_person(Some("Unknown"), Some("Person"), Sex::Unknown, None).unwrap();
+    // Add an event but not a birth date
+    a.add_event(p.id.clone(), EventType::Death, None, None, None).unwrap();
+    let report = missing_data_report(a.database()).unwrap();
+    assert!(report.contains("Unknown Person"));
+    assert!(report.contains("no birth date") || report.contains("unknown sex"));
+}
+
+#[test]
+fn missing_data_report_clean_person_absent() {
+    use kinforge_reports::missing_data_report;
+    let a = app();
+    let p = a.add_person(Some("Complete"), Some("Record"), Sex::Male, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1900, 1, 1).unwrap())),
+        None, None).unwrap();
+    let report = missing_data_report(a.database()).unwrap();
+    assert!(!report.contains("Complete Record"));
+}
+
+#[test]
+fn surnames_report_counts_and_sorts_by_frequency() {
+    use kinforge_reports::surnames_report;
+    let a = app();
+    // Three Smiths, one Jones
+    for given in &["Alice", "Bob", "Carol"] {
+        a.add_person(Some(given), Some("Smith"), Sex::Unknown, None).unwrap();
+    }
+    a.add_person(Some("Dave"), Some("Jones"), Sex::Male, None).unwrap();
+    let report = surnames_report(a.database()).unwrap();
+    let pos_smith = report.find("Smith").unwrap();
+    let pos_jones = report.find("Jones").unwrap();
+    assert!(pos_smith < pos_jones, "Smith (3) should appear before Jones (1)");
+    assert!(report.contains("3"));
+    assert!(report.contains("1"));
+}
