@@ -5,7 +5,7 @@ use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
-    ancestor_report, birthdays_report, descendant_report, family_group_sheet,
+    ancestor_report, birthdays_report, census_report, descendant_report, family_group_sheet,
     global_timeline_report, individual_report, narrative_report, people_list_report,
     places_report, sources_report, summary_report, timeline_report,
 };
@@ -77,6 +77,8 @@ pub enum ReportCommands {
     },
     /// Annual birthday reference — all people with known birth month and day, sorted by month/day
     Birthdays,
+    /// US census snapshots (1790–1940) — people likely alive at each census year
+    Census,
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -246,6 +248,9 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         }
         ReportCommands::Birthdays => {
             print!("{}", birthdays_report(app.database())?);
+        }
+        ReportCommands::Census => {
+            print!("{}", census_report(app.database())?);
         }
     }
     Ok(())

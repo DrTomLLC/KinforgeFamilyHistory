@@ -61,6 +61,7 @@ fn run(
                         state.detail_person_id = Some(pid);
                         state.detail_open = true;
                         state.detail_scroll = 0;
+                        state.detail_event_cursor = 0;
                     }
 
                     events::Action::OpenSourceDetail(sid) => {
@@ -99,10 +100,10 @@ fn run(
                         state.reload_tasks(app);
                     }
 
-                    events::Action::CreatePerson(given, surname) => {
+                    events::Action::CreatePerson(given, surname, sex) => {
                         let g = if given.is_empty() { None } else { Some(given.as_str()) };
                         let s = if surname.is_empty() { None } else { Some(surname.as_str()) };
-                        let _ = app.add_person(g, s, kinforge_core::models::Sex::Unknown, None);
+                        let _ = app.add_person(g, s, sex, None);
                         state.reload_people(app);
                     }
 
@@ -171,6 +172,60 @@ fn run(
                                 .map(|pl| pl.name))
                             .collect();
                         state.detail_events = evts;
+                        state.reload_top_places(app);
+                    }
+
+                    events::Action::EditEvent(eid, type_name, date_str, place_str) => {
+                        if let Ok(mut event) = app.get_event(&eid) {
+                            event.event_type = type_name.parse().unwrap_or(
+                                kinforge_core::models::EventType::Other(type_name)
+                            );
+                            event.date = if date_str.is_empty() {
+                                None
+                            } else {
+                                chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                    .ok()
+                                    .map(EventDate::Exact)
+                            };
+                            if !place_str.is_empty() {
+                                if let Ok(pid) = app.find_or_create_place(&place_str) {
+                                    event.place_id = Some(pid);
+                                }
+                            } else {
+                                event.place_id = None;
+                            }
+                            let _ = app.update_event(event);
+                            // Refresh detail panel events
+                            if let Some(ref pid) = state.detail_person_id.clone() {
+                                let evts = app.list_events_for_person(pid).unwrap_or_default();
+                                state.detail_event_places = evts.iter()
+                                    .map(|e| e.place_id.as_ref()
+                                        .and_then(|plid| app.get_place(plid).ok())
+                                        .map(|pl| pl.name))
+                                    .collect();
+                                state.detail_events = evts;
+                                state.detail_event_cursor = state.detail_event_cursor
+                                    .min(state.detail_events.len().saturating_sub(1));
+                            }
+                            state.reload_people(app);
+                        }
+                    }
+
+                    events::Action::DeleteEvent(eid) => {
+                        let _ = app.delete_event(&eid);
+                        // Refresh detail panel events
+                        if let Some(ref pid) = state.detail_person_id.clone() {
+                            let evts = app.list_events_for_person(pid).unwrap_or_default();
+                            state.detail_event_places = evts.iter()
+                                .map(|e| e.place_id.as_ref()
+                                    .and_then(|plid| app.get_place(plid).ok())
+                                    .map(|pl| pl.name))
+                                .collect();
+                            state.detail_events = evts;
+                            state.detail_event_cursor = state.detail_event_cursor
+                                .min(state.detail_events.len().saturating_sub(1));
+                        }
+                        state.reload_people(app);
                         state.reload_top_places(app);
                     }
 

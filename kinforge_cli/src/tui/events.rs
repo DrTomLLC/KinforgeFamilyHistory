@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use kinforge_core::models::{PersonId, SourceId, TaskId};
+use kinforge_core::models::{EventId, PersonId, Sex, SourceId, TaskId};
 
 use super::state::{
     build_filtered_task_rows, first_task_item_idx, InputMode, Tab, TaskRow,
@@ -15,7 +15,7 @@ pub enum Action {
     CreateTask(String),
     CycleTaskPriority(TaskId),
     DeleteTask(TaskId),
-    CreatePerson(String, String),   // (given, surname)
+    CreatePerson(String, String, Sex),  // (given, surname, sex)
     EditPerson(PersonId, String, String), // (id, given, surname)
     CreateSource(String, String),  // (title, author)
     DeletePerson(PersonId),
@@ -25,6 +25,8 @@ pub enum Action {
     CreateRelationship(PersonId, String, PersonId), // (person1, rel_type_token, person2)
     EditSource(SourceId, String, String, Option<i32>), // (id, title, author, year)
     UpdatePersonNotes(PersonId, String),                // (id, notes text)
+    EditEvent(EventId, String, String, String),         // (id, type_name, date_str, place_str)
+    DeleteEvent(EventId),
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -51,6 +53,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::RelationshipCreate => handle_rel_create(state, key),
         InputMode::SourceEdit => handle_source_edit(state, key),
         InputMode::PersonNotesEdit => handle_person_notes_edit(state, key),
+        InputMode::EventEdit => handle_event_edit(state, key),
     }
 }
 
@@ -78,7 +81,12 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             match state.active_tab {
                 Tab::People => {
                     if state.detail_open {
-                        state.detail_scroll = state.detail_scroll.saturating_sub(1);
+                        if !state.detail_events.is_empty() {
+                            state.detail_event_cursor =
+                                state.detail_event_cursor.saturating_sub(1);
+                        } else {
+                            state.detail_scroll = state.detail_scroll.saturating_sub(1);
+                        }
                     } else if state.people_selected > 0 {
                         state.people_selected -= 1;
                     }
@@ -100,7 +108,14 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             match state.active_tab {
                 Tab::People => {
                     if state.detail_open {
-                        state.detail_scroll = state.detail_scroll.saturating_add(1);
+                        if !state.detail_events.is_empty() {
+                            let max = state.detail_events.len() - 1;
+                            if state.detail_event_cursor < max {
+                                state.detail_event_cursor += 1;
+                            }
+                        } else {
+                            state.detail_scroll = state.detail_scroll.saturating_add(1);
+                        }
                     } else {
                         let max = state.filtered_people.len().saturating_sub(1);
                         if state.people_selected < max {
@@ -326,6 +341,48 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Edit selected event: press 'E' (shift+e) in People tab when detail is open
+        KeyCode::Char('E') if state.active_tab == Tab::People && state.detail_open => {
+            let idx = state.detail_event_cursor;
+            if let Some(evt) = state.detail_events.get(idx) {
+                let type_name = evt.event_type.to_string();
+                let type_idx = TUI_EVENT_TYPES.iter()
+                    .position(|&t| t.eq_ignore_ascii_case(&type_name))
+                    .unwrap_or(0);
+                let date_str = evt.date.as_ref().map(|d| {
+                    match d {
+                        kinforge_core::models::EventDate::Exact(nd)
+                        | kinforge_core::models::EventDate::Approximate(nd) =>
+                            nd.format("%Y-%m-%d").to_string(),
+                        _ => String::new(),
+                    }
+                }).unwrap_or_default();
+                let place_str = state.detail_event_places
+                    .get(idx).and_then(|p| p.as_deref()).unwrap_or("").to_string();
+                state.event_edit_id = Some(evt.id.clone());
+                state.event_edit_type_idx = type_idx;
+                state.event_edit_date = date_str;
+                state.event_edit_place = place_str;
+                state.event_edit_field = 0;
+                state.mode = InputMode::EventEdit;
+            }
+            Action::None
+        }
+
+        // Delete selected event: press 'x' in People tab when detail is open
+        KeyCode::Char('x') if state.active_tab == Tab::People && state.detail_open => {
+            let idx = state.detail_event_cursor;
+            if let Some(evt) = state.detail_events.get(idx) {
+                let label = evt.event_type.to_string();
+                state.confirm_name = label;
+                state.confirm_event_id = Some(evt.id.clone());
+                state.confirm_person_id = None;
+                state.confirm_source_id = None;
+                state.mode = InputMode::ConfirmDelete;
+            }
+            Action::None
+        }
+
         // Edit person notes: press 'N' in People tab (list or detail)
         KeyCode::Char('N') if state.active_tab == Tab::People => {
             let pid = if state.detail_open {
@@ -537,34 +594,46 @@ fn handle_task_create(state: &mut TuiState, key: KeyEvent) -> Action {
     Action::None
 }
 
+const SEX_OPTIONS: [Sex; 3] = [Sex::Unknown, Sex::Male, Sex::Female];
+
 fn handle_person_create(state: &mut TuiState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Esc => {
             state.mode = InputMode::Normal;
         }
-        KeyCode::Tab | KeyCode::BackTab => {
-            state.person_create_field = 1 - state.person_create_field;
+        KeyCode::Tab => {
+            state.person_create_field = (state.person_create_field + 1) % 3;
+        }
+        KeyCode::BackTab => {
+            state.person_create_field = (state.person_create_field + 2) % 3;
+        }
+        KeyCode::Left if state.person_create_field == 2 => {
+            state.person_create_sex = (state.person_create_sex + 2) % 3;
+        }
+        KeyCode::Right if state.person_create_field == 2 => {
+            state.person_create_sex = (state.person_create_sex + 1) % 3;
         }
         KeyCode::Enter => {
             let given = state.person_create_given.trim().to_string();
             let surname = state.person_create_surname.trim().to_string();
+            let sex = SEX_OPTIONS[state.person_create_sex as usize].clone();
             state.mode = InputMode::Normal;
             if !given.is_empty() || !surname.is_empty() {
-                return Action::CreatePerson(given, surname);
+                return Action::CreatePerson(given, surname, sex);
             }
         }
         KeyCode::Backspace => {
-            if state.person_create_field == 0 {
-                state.person_create_given.pop();
-            } else {
-                state.person_create_surname.pop();
+            match state.person_create_field {
+                0 => { state.person_create_given.pop(); }
+                1 => { state.person_create_surname.pop(); }
+                _ => {}
             }
         }
         KeyCode::Char(c) => {
-            if state.person_create_field == 0 {
-                state.person_create_given.push(c);
-            } else {
-                state.person_create_surname.push(c);
+            match state.person_create_field {
+                0 => state.person_create_given.push(c),
+                1 => state.person_create_surname.push(c),
+                _ => {}
             }
         }
         _ => {}
@@ -622,10 +691,14 @@ fn handle_confirm_delete(state: &mut TuiState, key: KeyEvent) -> Action {
             if let Some(sid) = state.confirm_source_id.take() {
                 return Action::DeleteSource(sid);
             }
+            if let Some(eid) = state.confirm_event_id.take() {
+                return Action::DeleteEvent(eid);
+            }
         }
         _ => {
             state.confirm_person_id = None;
             state.confirm_source_id = None;
+            state.confirm_event_id = None;
             state.confirm_name.clear();
             state.mode = InputMode::Normal;
         }
@@ -827,6 +900,54 @@ fn handle_source_edit(state: &mut TuiState, key: KeyEvent) -> Action {
                 _ => {}
             }
         }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_event_edit(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.event_edit_id = None;
+        }
+        KeyCode::Tab => {
+            state.event_edit_field = (state.event_edit_field + 1) % 3;
+        }
+        KeyCode::BackTab => {
+            state.event_edit_field = (state.event_edit_field + 2) % 3;
+        }
+        KeyCode::Left if state.event_edit_field == 0 => {
+            if state.event_edit_type_idx == 0 {
+                state.event_edit_type_idx = TUI_EVENT_TYPES.len() - 1;
+            } else {
+                state.event_edit_type_idx -= 1;
+            }
+        }
+        KeyCode::Right if state.event_edit_field == 0 => {
+            state.event_edit_type_idx =
+                (state.event_edit_type_idx + 1) % TUI_EVENT_TYPES.len();
+        }
+        KeyCode::Enter => {
+            if let Some(eid) = state.event_edit_id.take() {
+                let type_name = TUI_EVENT_TYPES[state.event_edit_type_idx].to_string();
+                let date_str = state.event_edit_date.trim().to_string();
+                let place_str = state.event_edit_place.trim().to_string();
+                state.mode = InputMode::Normal;
+                return Action::EditEvent(eid, type_name, date_str, place_str);
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace => match state.event_edit_field {
+            1 => { state.event_edit_date.pop(); }
+            2 => { state.event_edit_place.pop(); }
+            _ => {}
+        },
+        KeyCode::Char(c) => match state.event_edit_field {
+            1 => { state.event_edit_date.push(c); }
+            2 => { state.event_edit_place.push(c); }
+            _ => {}
+        },
         _ => {}
     }
     Action::None

@@ -71,6 +71,7 @@ pub enum InputMode {
     SourceEdit,
     ConfirmDelete,
     EventCreate,
+    EventEdit,
     RelationshipCreate,
 }
 
@@ -172,6 +173,7 @@ pub struct TuiState {
     pub detail_scroll: usize,
     pub detail_notes: Option<String>,
     pub detail_media_count: usize,
+    pub detail_event_cursor: usize, // which event is "selected" in the detail panel
 
     // Tasks list
     pub tasks: Vec<Task>,
@@ -224,7 +226,8 @@ pub struct TuiState {
     // Inline person creation
     pub person_create_given: String,
     pub person_create_surname: String,
-    pub person_create_field: u8, // 0 = given, 1 = surname
+    pub person_create_sex: u8,   // 0 = Unknown, 1 = Male, 2 = Female
+    pub person_create_field: u8, // 0 = given, 1 = surname, 2 = sex
 
     // Inline person edit (edit primary name of selected person)
     pub person_edit_given: String,
@@ -250,6 +253,16 @@ pub struct TuiState {
     pub event_create_place: String,
     pub event_create_field: u8,         // 0 = type, 1 = date, 2 = place
     pub event_create_person_id: Option<PersonId>,
+
+    // Inline event edit (from person detail panel)
+    pub event_edit_id: Option<EventId>,
+    pub event_edit_type_idx: usize,
+    pub event_edit_date: String,
+    pub event_edit_place: String,
+    pub event_edit_field: u8,           // 0 = type, 1 = date, 2 = place
+
+    // Delete confirmation for events (separate from person/source confirm)
+    pub confirm_event_id: Option<EventId>,
 
     // Inline relationship creation (from person detail panel)
     pub rel_create_person2_buf: String, // name fragment to match against people list
@@ -322,6 +335,7 @@ impl TuiState {
             detail_scroll: 0,
             detail_notes: None,
             detail_media_count: 0,
+            detail_event_cursor: 0,
             tasks,
             task_rows,
             tasks_selected: first_task,
@@ -352,6 +366,7 @@ impl TuiState {
             task_edit_field: 0,
             person_create_given: String::new(),
             person_create_surname: String::new(),
+            person_create_sex: 0,
             person_create_field: 0,
             person_edit_given: String::new(),
             person_edit_surname: String::new(),
@@ -370,6 +385,12 @@ impl TuiState {
             event_create_place: String::new(),
             event_create_field: 0,
             event_create_person_id: None,
+            event_edit_id: None,
+            event_edit_type_idx: 0,
+            event_edit_date: String::new(),
+            event_edit_place: String::new(),
+            event_edit_field: 0,
+            confirm_event_id: None,
             rel_create_person2_buf: String::new(),
             rel_create_type_idx: 0,
             rel_create_field: 0,

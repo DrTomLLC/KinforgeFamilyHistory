@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-28
-> **Build status:** 118 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.8.0
+> **Build status:** 123 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.9.0
 
 ---
 
@@ -100,7 +100,7 @@ Key design principles:
 | Plugin API with event hooks (`PluginEvent`, `on_event`, `notify`, `unregister_all`) | ✅ Complete | 2 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 118 tests passing, 0 failures, 0 warnings**
+**Total: 123 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -432,6 +432,7 @@ kinforge report summary
 kinforge report path --from <ID> --to <ID>
 kinforge report global-timeline [--limit <N>]
 kinforge report birthdays
+kinforge report census
 ```
 
 `--detailed` adds a birth-decade histogram and top-10 surname frequency table.
@@ -441,6 +442,8 @@ kinforge report birthdays
 `report global-timeline` lists all events across all people in chronological order. Defaults to 200 events; use `--limit` to adjust.
 
 `report birthdays` lists all people with a known birth month and day, sorted by month then day — useful as an annual birthday reference card.
+
+`report census` shows all people likely alive at each US decennial census year (1790–1940), based on known birth and death dates.
 
 ### `search`
 
@@ -552,6 +555,8 @@ Opens an interactive terminal UI with four tabs:
 | `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
 | `r` | People (detail open) | Open add-relationship popup (type ←/→, person name search) |
 | `N` | People | Open notes editor popup (prefilled with existing notes) |
+| `E` | People (detail open) | Edit the currently selected event (type ←/→, date, place) |
+| `x` | People (detail open) | Delete the currently selected event (confirm popup) |
 | `Enter` | Tasks | Open task detail panel (status, priority, notes, created date) |
 | `x` | People | Open confirm-delete popup for selected person |
 | `e` | Sources | Edit selected source (title, author, year; prefilled popup) |
@@ -682,6 +687,13 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `/` in Sources tab — filter sources list by title (context-aware search mode)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
+
+**v1.9.0 (Phase 23):**
+- [x] TUI: `↑`/`↓` in person detail panel selects individual events; selected event highlighted
+- [x] TUI: `E` in person detail — edit selected event (type, date, place; prefilled popup)
+- [x] TUI: `x` in person detail — delete selected event (confirm popup)
+- [x] TUI: person create popup now includes Sex field (3rd field, ←/→ cycles Unknown/Male/Female)
+- [x] `kinforge report census` — US census snapshots 1790–1940 showing who was likely alive
 
 **v1.8.0 (Phase 22):**
 - [x] Plugin API: `PluginEvent` enum with lifecycle hooks (`on_event`); `PluginRegistry::notify()` dispatches to all plugins; `unregister_all()` calls `on_unload` on each

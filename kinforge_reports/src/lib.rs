@@ -1381,6 +1381,98 @@ pub fn summary_report(db: &Database) -> KinforgeResult<String> {
     Ok(out)
 }
 
+// ─── census report ───────────────────────────────────────────────────────────
+
+/// Snapshot of people likely alive at each US decennial census year 1790–1940.
+///
+/// "Likely alive" = born on or before the census year AND (no death event, OR
+/// death year >= census year).
+pub fn census_report(db: &Database) -> KinforgeResult<String> {
+    use chrono::Datelike;
+
+    const CENSUS_YEARS: &[i32] = &[
+        1790, 1800, 1810, 1820, 1830, 1840, 1850, 1860,
+        1870, 1880, 1890, 1900, 1910, 1920, 1930, 1940,
+    ];
+
+    let people = db.list_people()?;
+
+    // For each person, gather birth year and death year from their events
+    struct PersonSnapshot {
+        name: String,
+        birth_year: Option<i32>,
+        death_year: Option<i32>,
+    }
+
+    let mut snapshots: Vec<PersonSnapshot> = Vec::with_capacity(people.len());
+    for person in &people {
+        let events = db.list_events_for_person(&person.id)?;
+        let birth_year = events.iter()
+            .find(|e| matches!(e.event_type, EventType::Birth))
+            .and_then(|e| e.date.as_ref())
+            .and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                _ => None,
+            });
+        let death_year = events.iter()
+            .find(|e| matches!(e.event_type, EventType::Death))
+            .and_then(|e| e.date.as_ref())
+            .and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                _ => None,
+            });
+        snapshots.push(PersonSnapshot {
+            name: person.display_name(),
+            birth_year,
+            death_year,
+        });
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        "  US Census Snapshots (1790–1940)  ".bold().bright_cyan().on_black(),
+        "─".repeat(38).bright_black()
+    ));
+
+    for &year in CENSUS_YEARS {
+        let alive: Vec<&PersonSnapshot> = snapshots.iter()
+            .filter(|p| {
+                let born_before = p.birth_year.map(|by| by <= year).unwrap_or(false);
+                let not_dead = p.death_year.map(|dy| dy >= year).unwrap_or(true);
+                born_before && not_dead
+            })
+            .collect();
+
+        if alive.is_empty() {
+            continue;
+        }
+
+        out.push_str(&format!(
+            "  {} {}\n",
+            year.to_string().bold().cyan(),
+            format!("({} people)", alive.len()).bright_black()
+        ));
+        for p in &alive {
+            let birth = p.birth_year.map(|y| format!("b.{}", y)).unwrap_or_default();
+            let death = p.death_year.map(|y| format!(" d.{}", y)).unwrap_or_default();
+            out.push_str(&format!(
+                "    {}  {}{}\n",
+                p.name.bold(),
+                birth.bright_black(),
+                death.bright_black()
+            ));
+        }
+        out.push('\n');
+    }
+
+    if out.lines().count() <= 3 {
+        out.push_str(&format!("  {}\n", "(no people with birth years in 1790–1940 range)".bright_black()));
+    }
+
+    Ok(out)
+}
+
 // ─── birthdays report ────────────────────────────────────────────────────────
 
 /// Annual birthday reference: all people with known birth month+day, sorted by month then day.

@@ -1607,3 +1607,78 @@ fn birthdays_report_sorted_by_month_day() {
     assert!(pos_mar < pos_jun, "March should appear before June");
     assert!(report.contains("3 with known date") || report.contains("Birthdays"));
 }
+
+// ── Phase 23 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn event_update_changes_type_and_date() {
+    let a = app();
+    let p = a.add_person(Some("Nikola"), Some("Tesla"), Sex::Male, None).unwrap();
+    let date = EventDate::Exact(NaiveDate::from_ymd_opt(1856, 7, 10).unwrap());
+    let evt = a.add_event(p.id.clone(), EventType::Birth, Some(date), None, None).unwrap();
+
+    let mut updated = a.get_event(&evt.id).unwrap();
+    updated.event_type = EventType::Baptism;
+    updated.date = Some(EventDate::Exact(NaiveDate::from_ymd_opt(1856, 7, 28).unwrap()));
+    a.update_event(updated).unwrap();
+
+    let retrieved = a.get_event(&evt.id).unwrap();
+    assert!(matches!(retrieved.event_type, EventType::Baptism));
+    assert_eq!(
+        retrieved.date,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1856, 7, 28).unwrap()))
+    );
+}
+
+#[test]
+fn event_delete_removes_from_person_events() {
+    let a = app();
+    let p = a.add_person(Some("Marie"), Some("Curie"), Sex::Female, None).unwrap();
+    let e1 = a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    let e2 = a.add_event(p.id.clone(), EventType::Death, None, None, None).unwrap();
+    assert_eq!(a.list_events_for_person(&p.id).unwrap().len(), 2);
+    a.delete_event(&e1.id).unwrap();
+    let remaining = a.list_events_for_person(&p.id).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, e2.id);
+}
+
+#[test]
+fn person_create_with_sex_male() {
+    let a = app();
+    let p = a.add_person(Some("Charles"), Some("Darwin"), Sex::Male, None).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert!(matches!(retrieved.sex, Sex::Male));
+    assert_eq!(retrieved.names[0].given.as_deref(), Some("Charles"));
+}
+
+#[test]
+fn person_create_with_sex_female() {
+    let a = app();
+    let p = a.add_person(Some("Ada"), Some("Lovelace"), Sex::Female, None).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert!(matches!(retrieved.sex, Sex::Female));
+}
+
+#[test]
+fn census_report_includes_person_born_before_census() {
+    use kinforge_reports::census_report;
+    let a = app();
+    let p = a.add_person(Some("Abraham"), Some("Lincoln"), Sex::Male, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1809, 2, 12).unwrap())),
+        None, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1865, 4, 15).unwrap())),
+        None, None).unwrap();
+    let report = census_report(a.database()).unwrap();
+    // Lincoln born 1809, dead 1865 — should appear in 1810 through 1860 censuses
+    assert!(report.contains("Abraham Lincoln"));
+    // Should NOT appear in 1870 (died 1865)
+    let pos_1870 = report.find("1870");
+    let pos_lincoln = report.find("Abraham Lincoln");
+    if let (Some(p70), Some(pl)) = (pos_1870, pos_lincoln) {
+        // Lincoln must appear before 1870 section
+        assert!(pl < p70, "Lincoln should not appear in 1870 census");
+    }
+}

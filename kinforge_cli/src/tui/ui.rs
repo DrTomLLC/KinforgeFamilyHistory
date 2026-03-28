@@ -92,6 +92,9 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     if state.mode == InputMode::PersonNotesEdit {
         draw_person_notes_popup(frame, state, area);
     }
+    if state.mode == InputMode::EventEdit {
+        draw_event_edit_popup(frame, state, area);
+    }
 }
 
 fn draw_confirm_delete_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -165,12 +168,12 @@ fn draw_person_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
 fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
     let popup_width = 50_u16.min(area.width.saturating_sub(4));
     let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.y + area.height / 2 - 2;
+    let popup_y = area.y + area.height / 2 - 3;
     let popup_area = Rect {
         x: popup_x,
         y: popup_y,
         width: popup_width,
-        height: 5,
+        height: 7,
     };
 
     let cursor = "_";
@@ -183,6 +186,12 @@ fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
         format!("{}{}", state.person_create_surname, cursor)
     } else {
         state.person_create_surname.clone()
+    };
+    let sex_labels = ["Unknown", "Male", "Female"];
+    let sex_text = if state.person_create_field == 2 {
+        format!("◄ {} ►", sex_labels[state.person_create_sex as usize])
+    } else {
+        sex_labels[state.person_create_sex as usize].to_string()
     };
 
     let active = Style::default().fg(Color::Yellow);
@@ -198,12 +207,17 @@ fn draw_person_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
             Span::styled("  Surname: ", Style::default().fg(Color::Cyan)),
             Span::styled(surname_text, if state.person_create_field == 1 { active } else { inactive }),
         ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Sex:     ", Style::default().fg(Color::Cyan)),
+            Span::styled(sex_text, if state.person_create_field == 2 { active } else { inactive }),
+        ]),
     ];
 
     let para = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" New Person — Tab: switch · Enter: save · Esc: cancel ")
+            .title(" New Person — Tab: switch · ←/→: sex · Enter: save · Esc: cancel ")
             .border_style(Style::default().fg(Color::Green)),
     );
 
@@ -339,6 +353,63 @@ fn draw_person_notes_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
     frame.render_widget(para, popup_area);
 }
 
+fn draw_event_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 58_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 3;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 7 };
+
+    let type_name = TUI_EVENT_TYPES[state.event_edit_type_idx];
+    let type_text = if state.event_edit_field == 0 {
+        format!("◄ {} ►", type_name)
+    } else {
+        type_name.to_string()
+    };
+    let cursor = "_";
+    let date_text = if state.event_edit_field == 1 {
+        format!("{}{}", state.event_edit_date, cursor)
+    } else {
+        state.event_edit_date.clone()
+    };
+    let place_text = if state.event_edit_field == 2 {
+        format!("{}{}", state.event_edit_place, cursor)
+    } else {
+        state.event_edit_place.clone()
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Type:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(type_text, if state.event_edit_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled("          ←/→ cycle types", Style::default().fg(Color::DarkGray))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Date:   ", Style::default().fg(Color::Cyan)),
+            Span::styled(date_text, if state.event_edit_field == 1 { active } else { inactive }),
+            Span::styled(" (YYYY-MM-DD, optional)", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Place:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(place_text, if state.event_edit_field == 2 { active } else { inactive }),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Event — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
 fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
     let sort_badge = format!("[sort: {}]", state.sort_order.label());
     let title = if state.search_active {
@@ -424,6 +495,7 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
         )));
     } else {
         for (i, event) in state.detail_events.iter().enumerate() {
+            let is_selected = i == state.detail_event_cursor;
             let date_str = event
                 .date
                 .as_ref()
@@ -434,10 +506,16 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
                 .and_then(|p| p.as_deref())
                 .map(|p| format!("  @ {}", truncate(p, 20)))
                 .unwrap_or_default();
+            let prefix = if is_selected { "» " } else { "  " };
+            let type_style = if is_selected {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Yellow)
+            };
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {:<14}", truncate(&event.event_type.to_string(), 14)),
-                    Style::default().fg(Color::Yellow),
+                    format!("{}{:<13}", prefix, truncate(&event.event_type.to_string(), 13)),
+                    type_style,
                 ),
                 Span::raw(date_str),
                 Span::styled(place_str, Style::default().fg(Color::DarkGray)),
@@ -1204,10 +1282,11 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::RelationshipCreate => " Tab: switch field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::SourceEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonNotesEdit => " Type notes  Enter: save  Esc: cancel".to_string(),
+        InputMode::EventEdit => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
-                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  r: add rel  e: edit name  N: notes  Tab: next  q: quit".to_string()
+                    " ↑↓/jk: select event  E: edit event  x: delete event  a: add  r: add rel  e: name  N: notes  Esc: close".to_string()
                 } else {
                     " Tab: next  ↑↓/jk  g/G  n: new  e: edit  N: notes  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()
