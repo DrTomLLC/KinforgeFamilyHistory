@@ -508,6 +508,7 @@ dependencies = [
  "kinforge_config",
  "kinforge_core",
  "kinforge_import_export",
+ "kinforge_plugin_api",
  "kinforge_query",
  "kinforge_reports",
  "kinforge_storage",
