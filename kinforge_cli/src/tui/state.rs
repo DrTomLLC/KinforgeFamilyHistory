@@ -74,6 +74,8 @@ pub enum InputMode {
     EventEdit,
     RelationshipCreate,
     CitationCreate,
+    Help,
+    TaskNotesEdit,
 }
 
 // ── SortOrder ─────────────────────────────────────────────────────────────────
@@ -280,6 +282,10 @@ pub struct TuiState {
     // Task detail panel
     pub task_detail_open: bool,
 
+    // Inline task notes edit
+    pub task_notes_buf: String,
+    pub task_notes_id: Option<TaskId>,
+
     // Inline citation creation (from person detail panel, selected event)
     pub citation_event_id: Option<EventId>,
     pub citation_source_buf: String,         // search fragment typed by user
@@ -411,6 +417,8 @@ impl TuiState {
             person_notes_buf: String::new(),
             person_notes_id: None,
             task_detail_open: false,
+            task_notes_buf: String::new(),
+            task_notes_id: None,
             citation_event_id: None,
             citation_source_buf: String::new(),
             citation_source_matches: vec![],

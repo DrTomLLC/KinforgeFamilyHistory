@@ -1821,3 +1821,78 @@ fn surnames_report_shows_decade_range_for_person_with_birth_year() {
     assert!(report.contains("Edison"));
     assert!(report.contains("1840s") || report.contains("1840"));
 }
+
+// ── Phase 26 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn anniversary_report_includes_person_born_near_today() {
+    use kinforge_reports::anniversary_report;
+    use chrono::{Local, Datelike};
+    let a = app();
+    let p = a.add_person(Some("Birthday"), Some("Soon"), Sex::Female, None).unwrap();
+    // Use a date 7 days from today (same month/day in some past year)
+    let today = Local::now().date_naive();
+    // Pick a date 3 days from now, but in 1950 (for the "years since" calc)
+    let target = today + chrono::Duration::days(3);
+    let birth_date = NaiveDate::from_ymd_opt(1950, target.month(), target.day()).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(birth_date)), None, None).unwrap();
+    let report = anniversary_report(a.database(), 30).unwrap();
+    assert!(report.contains("Birthday Soon"));
+}
+
+#[test]
+fn anniversary_report_excludes_person_outside_window() {
+    use kinforge_reports::anniversary_report;
+    use chrono::{Local, Datelike};
+    let a = app();
+    let p = a.add_person(Some("Far"), Some("Away"), Sex::Male, None).unwrap();
+    // Birth date is 200 days from now
+    let today = Local::now().date_naive();
+    let target = today + chrono::Duration::days(200);
+    let birth_date = NaiveDate::from_ymd_opt(1900, target.month(), target.day()).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(birth_date)), None, None).unwrap();
+    let report = anniversary_report(a.database(), 30).unwrap();
+    assert!(!report.contains("Far Away"));
+}
+
+#[test]
+fn task_notes_update_persists() {
+    let a = app();
+    let task = a.add_task("Research Smith line", None, TaskPriority::Medium, None).unwrap();
+    let mut t = a.get_task(&task.id).unwrap();
+    t.notes = Some("Check 1880 census".to_string());
+    t.touch();
+    a.update_task(t).unwrap();
+    let updated = a.get_task(&task.id).unwrap();
+    assert_eq!(updated.notes.as_deref(), Some("Check 1880 census"));
+}
+
+#[test]
+fn task_notes_cleared_when_empty_string() {
+    let a = app();
+    let task = a.add_task("Clear notes test", None, TaskPriority::Low, Some("initial")).unwrap();
+    let mut t = a.get_task(&task.id).unwrap();
+    t.notes = None;
+    t.touch();
+    a.update_task(t).unwrap();
+    let updated = a.get_task(&task.id).unwrap();
+    assert!(updated.notes.is_none());
+}
+
+#[test]
+fn anniversary_report_shows_years_since_for_birth() {
+    use kinforge_reports::anniversary_report;
+    use chrono::{Local, Datelike};
+    let a = app();
+    let p = a.add_person(Some("Centennial"), Some("Ancestor"), Sex::Unknown, None).unwrap();
+    let today = Local::now().date_naive();
+    // Put anniversary exactly today to guarantee it appears
+    let birth = NaiveDate::from_ymd_opt(1924, today.month(), today.day()).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(birth)), None, None).unwrap();
+    let report = anniversary_report(a.database(), 0).unwrap();
+    // Should appear (0 days window = today only)
+    assert!(report.contains("Centennial Ancestor"));
+}

@@ -290,6 +290,15 @@ fn run(
                         }
                     }
 
+                    events::Action::UpdateTaskNotes(tid, notes) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.notes = if notes.is_empty() { None } else { Some(notes) };
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
+                    }
+
                     events::Action::AddCitation(eid, sid, page) => {
                         let page_opt = if page.is_empty() { None } else { Some(page.as_str()) };
                         let _ = app.add_citation(

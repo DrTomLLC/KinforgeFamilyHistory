@@ -30,6 +30,7 @@ pub enum Action {
     DeleteRelationship(RelationshipId),
     StartTask(TaskId),
     AddCitation(EventId, SourceId, String), // (event_id, source_id, page)
+    UpdateTaskNotes(TaskId, String),        // (id, notes text; empty = clear)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -58,6 +59,8 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::PersonNotesEdit => handle_person_notes_edit(state, key),
         InputMode::EventEdit => handle_event_edit(state, key),
         InputMode::CitationCreate => handle_citation_create(state, key),
+        InputMode::Help => handle_help(state, key),
+        InputMode::TaskNotesEdit => handle_task_notes_edit(state, key),
     }
 }
 
@@ -480,6 +483,28 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
         KeyCode::Char('s') if state.active_tab == Tab::People && !state.detail_open && !state.search_active => {
             state.sort_order = state.sort_order.next();
             state.recompute_filter();
+            Action::None
+        }
+
+        // Help popup: press '?' anywhere in Normal mode
+        KeyCode::Char('?') => {
+            state.mode = InputMode::Help;
+            Action::None
+        }
+
+        // Edit task notes: press 'N' in Tasks tab
+        KeyCode::Char('N') if state.active_tab == Tab::Tasks => {
+            let info = if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+                let task = &state.tasks[*idx];
+                Some((task.id.clone(), task.notes.clone().unwrap_or_default()))
+            } else {
+                None
+            };
+            if let Some((tid, existing_notes)) = info {
+                state.task_notes_buf = existing_notes;
+                state.task_notes_id = Some(tid);
+                state.mode = InputMode::TaskNotesEdit;
+            }
             Action::None
         }
 
@@ -1162,6 +1187,38 @@ fn handle_citation_create(state: &mut TuiState, key: KeyEvent) -> Action {
         }
         KeyCode::Char(c) if state.citation_field == 1 => {
             state.citation_page_buf.push(c);
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_help(_state: &mut TuiState, _key: KeyEvent) -> Action {
+    // Any key dismisses the help popup
+    _state.mode = InputMode::Normal;
+    Action::None
+}
+
+fn handle_task_notes_edit(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.task_notes_id = None;
+        }
+        KeyCode::Enter => {
+            if let Some(tid) = state.task_notes_id.take() {
+                let notes = state.task_notes_buf.trim().to_string();
+                state.mode = InputMode::Normal;
+                state.task_notes_buf.clear();
+                return Action::UpdateTaskNotes(tid, notes);
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace => {
+            state.task_notes_buf.pop();
+        }
+        KeyCode::Char(c) => {
+            state.task_notes_buf.push(c);
         }
         _ => {}
     }

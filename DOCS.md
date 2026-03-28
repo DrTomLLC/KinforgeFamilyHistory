@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-28
-> **Build status:** 107 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.11.0
+> **Build status:** 112 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.12.0
 
 ---
 
@@ -100,9 +100,12 @@ Key design principles:
 | Plugin API with event hooks (`PluginEvent`, `on_event`, `notify`, `unregister_all`) | ✅ Complete | 2 tests |
 | TUI: cite event popup (`C` key, source search + page, adds citation to selected event) | ✅ Complete | tested |
 | `kinforge report completeness` — per-person completeness score with colour bar | ✅ Complete | 2 tests |
+| TUI: `?` help popup — context-sensitive keybinding reference for all tabs | ✅ Complete | — |
+| TUI: `N` in Tasks tab — edit task notes via popup | ✅ Complete | 2 tests |
+| `kinforge report anniversary [--days N]` — upcoming birth/marriage anniversaries | ✅ Complete | 3 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 107 tests passing, 0 failures, 0 warnings**
+**Total: 112 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -689,6 +692,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `/` in Sources tab — filter sources list by title (context-aware search mode)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
+
+**v1.12.0 (Phase 26):**
+- [x] TUI: `?` key — context-sensitive keyboard shortcut help popup (different content per tab and panel state)
+- [x] TUI: `N` in Tasks tab — edit task notes via single-line popup (works from list and task detail panel)
+- [x] `kinforge report anniversary [--days N]` — upcoming birthdays and marriage anniversaries within N days (default 365), sorted by days-until, with years-since label
+- [x] Integration tests: 112 total (107 → 112)
 
 **v1.11.0 (Phase 25):**
 - [x] TUI: `C` in person detail panel — cite selected event (source search popup with ↑/↓ cycling, optional page field)

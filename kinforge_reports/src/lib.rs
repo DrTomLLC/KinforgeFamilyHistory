@@ -1822,3 +1822,116 @@ pub fn completeness_report(db: &Database) -> KinforgeResult<String> {
 
     Ok(out)
 }
+
+// ─── anniversary report ─────────────────────────────────────────────────────
+
+/// Upcoming anniversaries within `days` days from today (default 365).
+///
+/// Scans all birth and marriage events; computes next occurrence of the
+/// month/day in the current or next calendar year, then filters to those
+/// within the requested window.  Results are sorted by days-until ascending.
+pub fn anniversary_report(db: &Database, days: u32) -> KinforgeResult<String> {
+    use chrono::{Datelike, Local};
+
+    let today = Local::now().date_naive();
+    let window_end = today + chrono::Duration::days(days as i64);
+
+    #[derive(Clone)]
+    struct Hit {
+        days_until: i64,
+        name: String,
+        event_type: String,
+        original_year: i32,
+        month: u32,
+        day: u32,
+    }
+
+    let interesting: &[EventType] = &[EventType::Birth, EventType::Marriage];
+    let people = db.list_people()?;
+    let mut hits: Vec<Hit> = Vec::new();
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id).unwrap_or_default();
+        for event in &events {
+            if !interesting.contains(&event.event_type) {
+                continue;
+            }
+            let (month, day, orig_year) = match &event.date {
+                Some(EventDate::Exact(nd)) | Some(EventDate::Approximate(nd)) => {
+                    (nd.month(), nd.day(), nd.year())
+                }
+                _ => continue,
+            };
+
+            // Next occurrence this calendar year or next
+            let this_year = today.year();
+            let candidate = NaiveDate::from_ymd_opt(this_year, month, day)
+                .unwrap_or_else(|| NaiveDate::from_ymd_opt(this_year, month, day - 1).unwrap());
+            let next_occ = if candidate >= today {
+                candidate
+            } else {
+                NaiveDate::from_ymd_opt(this_year + 1, month, day)
+                    .unwrap_or_else(|| NaiveDate::from_ymd_opt(this_year + 1, month, day - 1).unwrap())
+            };
+
+            if next_occ <= window_end {
+                let days_until = (next_occ - today).num_days();
+                hits.push(Hit {
+                    days_until,
+                    name: person.display_name(),
+                    event_type: event.event_type.to_string(),
+                    original_year: orig_year,
+                    month,
+                    day,
+                });
+            }
+        }
+    }
+
+    hits.sort_by_key(|h| h.days_until);
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Upcoming Anniversaries — next {} days ({} found)  ", days, hits.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(52).bright_black()
+    ));
+
+    if hits.is_empty() {
+        out.push_str(&format!("  {}\n", "(none found in window)".bright_black()));
+        return Ok(out);
+    }
+
+    let month_names = [
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+
+    for hit in &hits {
+        let in_label = if hit.days_until == 0 {
+            "today".green().bold().to_string()
+        } else if hit.days_until == 1 {
+            "tomorrow".yellow().to_string()
+        } else {
+            format!("{} days", hit.days_until).normal().to_string()
+        };
+        let years_since = today.year() - hit.original_year;
+        let yrs_label = if years_since > 0 {
+            format!("  ({}yr)", years_since).bright_black().to_string()
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "  {:>9}  {} {:>2}  {}  {}{}\n",
+            in_label,
+            month_names[hit.month as usize].cyan(),
+            hit.day.to_string().cyan(),
+            hit.name.bold(),
+            hit.event_type.bright_black(),
+            yrs_label
+        ));
+    }
+
+    Ok(out)
+}

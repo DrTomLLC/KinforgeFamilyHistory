@@ -5,10 +5,10 @@ use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
-    ancestor_report, birthdays_report, census_report, completeness_report, descendant_report,
-    family_group_sheet, global_timeline_report, individual_report, missing_data_report,
-    narrative_report, people_list_report, places_report, sources_report, summary_report,
-    surnames_report, timeline_report,
+    ancestor_report, anniversary_report, birthdays_report, census_report, completeness_report,
+    descendant_report, family_group_sheet, global_timeline_report, individual_report,
+    missing_data_report, narrative_report, people_list_report, places_report, sources_report,
+    summary_report, surnames_report, timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 use std::collections::HashMap;
@@ -86,6 +86,12 @@ pub enum ReportCommands {
     Surnames,
     /// Per-person completeness score (birth date, sex, relationships, citations, etc.)
     Completeness,
+    /// Upcoming birthdays and anniversaries within N days (default: 365)
+    Anniversary {
+        /// Number of days to look ahead
+        #[arg(long, default_value = "365")]
+        days: u32,
+    },
 }
 
 pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
@@ -267,6 +273,9 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         }
         ReportCommands::Completeness => {
             print!("{}", completeness_report(app.database())?);
+        }
+        ReportCommands::Anniversary { days } => {
+            print!("{}", anniversary_report(app.database(), days)?);
         }
     }
     Ok(())
