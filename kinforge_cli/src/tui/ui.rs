@@ -95,6 +95,9 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     if state.mode == InputMode::EventEdit {
         draw_event_edit_popup(frame, state, area);
     }
+    if state.mode == InputMode::CitationCreate {
+        draw_citation_create_popup(frame, state, area);
+    }
 }
 
 fn draw_confirm_delete_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -404,6 +407,72 @@ fn draw_event_edit_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
             .borders(Borders::ALL)
             .title(" Edit Event — Tab: switch · Enter: save · Esc: cancel ")
             .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
+fn draw_citation_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 62_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 4;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 9 };
+
+    let cursor = "_";
+    let source_query_text = if state.citation_field == 0 {
+        format!("{}{}", state.citation_source_buf, cursor)
+    } else {
+        state.citation_source_buf.clone()
+    };
+    let page_text = if state.citation_field == 1 {
+        format!("{}{}", state.citation_page_buf, cursor)
+    } else {
+        state.citation_page_buf.clone()
+    };
+
+    let match_count = state.citation_source_matches.len();
+    let match_label = if match_count == 0 {
+        "(no matches)".to_string()
+    } else {
+        let cur = state.citation_source_cursor.min(match_count - 1);
+        let title = &state.citation_source_matches[cur].1;
+        if match_count == 1 {
+            format!("→ {}", truncate(title, 38))
+        } else {
+            format!("→ {} ({}/{})", truncate(title, 30), cur + 1, match_count)
+        }
+    };
+
+    let active = Style::default().fg(Color::Yellow);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Source:  ", Style::default().fg(Color::Cyan)),
+            Span::styled(source_query_text, if state.citation_field == 0 { active } else { inactive }),
+        ]),
+        Line::from(Span::styled(
+            format!("  {}", match_label),
+            Style::default().fg(Color::Green),
+        )),
+        Line::from(Span::styled(
+            "           ↑/↓: cycle  Tab: switch field",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Page:    ", Style::default().fg(Color::Cyan)),
+            Span::styled(page_text, if state.citation_field == 1 { active } else { inactive }),
+            Span::styled(" (optional)", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Cite Event — Tab: switch · Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Green)),
     );
 
     frame.render_widget(Clear, popup_area);
@@ -1290,10 +1359,11 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::SourceEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
         InputMode::PersonNotesEdit => " Type notes  Enter: save  Esc: cancel".to_string(),
         InputMode::EventEdit => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
+        InputMode::CitationCreate => " Tab: switch field  ↑↓: select source  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
-                    " ↑↓/jk: select event  E: edit event  x: delete event  a: add  r: add rel  e: name  N: notes  Esc: close".to_string()
+                    " ↑↓/jk: event  E: edit  x: del event  C: cite  J/K: rel  X: del rel  a: add  r: rel  e: name  N: notes  Esc: close".to_string()
                 } else {
                     " Tab: next  ↑↓/jk  g/G  n: new  e: edit  N: notes  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()
@@ -1301,9 +1371,9 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
             }
             Tab::Tasks => {
                 if state.task_detail_open {
-                    " Enter/Esc: close detail  ↑↓/jk  d/c: done  e: edit  p: priority  Tab: next  q: quit".to_string()
+                    " Enter/Esc: close  ↑↓/jk  s: start  d/c: done  e: edit  p: priority  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  d/c: done  p: priority  x: delete  f: filter  Enter: detail  q: quit".to_string()
+                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  s: start  d/c: done  p: priority  x: delete  f: filter  Enter: detail  q: quit".to_string()
                 }
             }
             Tab::Sources => {

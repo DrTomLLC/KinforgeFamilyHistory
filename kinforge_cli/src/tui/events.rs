@@ -29,6 +29,7 @@ pub enum Action {
     DeleteEvent(EventId),
     DeleteRelationship(RelationshipId),
     StartTask(TaskId),
+    AddCitation(EventId, SourceId, String), // (event_id, source_id, page)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -56,6 +57,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::SourceEdit => handle_source_edit(state, key),
         InputMode::PersonNotesEdit => handle_person_notes_edit(state, key),
         InputMode::EventEdit => handle_event_edit(state, key),
+        InputMode::CitationCreate => handle_citation_create(state, key),
     }
 }
 
@@ -413,6 +415,24 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
                 state.confirm_source_id = None;
                 state.confirm_event_id = None;
                 state.mode = InputMode::ConfirmDelete;
+            }
+            Action::None
+        }
+
+        // Cite selected event: press 'C' in People detail
+        KeyCode::Char('C') if state.active_tab == Tab::People && state.detail_open => {
+            let idx = state.detail_event_cursor;
+            if let Some(evt) = state.detail_events.get(idx) {
+                state.citation_event_id = Some(evt.id.clone());
+                state.citation_source_buf.clear();
+                state.citation_page_buf.clear();
+                state.citation_field = 0;
+                // Populate all sources as initial matches
+                state.citation_source_matches = state.sources.iter()
+                    .map(|s| (s.id.clone(), s.title.clone()))
+                    .collect();
+                state.citation_source_cursor = 0;
+                state.mode = InputMode::CitationCreate;
             }
             Action::None
         }
@@ -1075,6 +1095,73 @@ fn handle_rel_create(state: &mut TuiState, key: KeyEvent) -> Action {
         }
         KeyCode::Char(c) if state.rel_create_field == 0 => {
             state.rel_create_person2_buf.push(c);
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_citation_create(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.citation_event_id = None;
+        }
+        KeyCode::Tab => {
+            state.citation_field = if state.citation_field == 0 { 1 } else { 0 };
+        }
+        KeyCode::BackTab => {
+            state.citation_field = if state.citation_field == 0 { 1 } else { 0 };
+        }
+        KeyCode::Up if state.citation_field == 0 => {
+            state.citation_source_cursor =
+                state.citation_source_cursor.saturating_sub(1);
+        }
+        KeyCode::Down if state.citation_field == 0 => {
+            let max = state.citation_source_matches.len().saturating_sub(1);
+            if state.citation_source_cursor < max {
+                state.citation_source_cursor += 1;
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(eid) = state.citation_event_id.take() {
+                if let Some((sid, _)) =
+                    state.citation_source_matches.get(state.citation_source_cursor).cloned()
+                {
+                    let page = state.citation_page_buf.trim().to_string();
+                    state.mode = InputMode::Normal;
+                    state.citation_source_buf.clear();
+                    state.citation_page_buf.clear();
+                    return Action::AddCitation(eid, sid, page);
+                }
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace if state.citation_field == 0 => {
+            state.citation_source_buf.pop();
+            // Refilter
+            let q = state.citation_source_buf.to_lowercase();
+            state.citation_source_matches = state.sources.iter()
+                .filter(|s| s.title.to_lowercase().contains(&q))
+                .map(|s| (s.id.clone(), s.title.clone()))
+                .collect();
+            state.citation_source_cursor = 0;
+        }
+        KeyCode::Backspace if state.citation_field == 1 => {
+            state.citation_page_buf.pop();
+        }
+        KeyCode::Char(c) if state.citation_field == 0 => {
+            state.citation_source_buf.push(c);
+            // Refilter
+            let q = state.citation_source_buf.to_lowercase();
+            state.citation_source_matches = state.sources.iter()
+                .filter(|s| s.title.to_lowercase().contains(&q))
+                .map(|s| (s.id.clone(), s.title.clone()))
+                .collect();
+            state.citation_source_cursor = 0;
+        }
+        KeyCode::Char(c) if state.citation_field == 1 => {
+            state.citation_page_buf.push(c);
         }
         _ => {}
     }

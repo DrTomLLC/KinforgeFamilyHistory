@@ -1678,3 +1678,147 @@ pub fn surnames_report(db: &Database) -> KinforgeResult<String> {
 
     Ok(out)
 }
+
+// ─── completeness report ────────────────────────────────────────────────────
+
+/// Per-person completeness scoring (0–10 pts), sorted lowest-first.
+///
+/// Points awarded:
+///   2 — has birth date
+///   1 — has birth place
+///   1 — has known sex (not Unknown)
+///   2 — has death date (only if a death event exists)
+///   1 — has at least one relationship
+///   2 — has at least one citation on any event
+pub fn completeness_report(db: &Database) -> KinforgeResult<String> {
+    let people = db.list_people()?;
+
+    struct Entry {
+        name: String,
+        score: u8,
+        max: u8,
+        missing: Vec<&'static str>,
+    }
+
+    let mut entries: Vec<Entry> = Vec::new();
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id).unwrap_or_default();
+        let rels = db.list_relationships_for_person(&person.id).unwrap_or_default();
+
+        let mut score = 0u8;
+        let mut max = 8u8; // birth date (2) + birth place (1) + sex (1) + rels (1) + citations (2) + death date (2 if applicable)
+        let mut missing: Vec<&'static str> = Vec::new();
+
+        // Birth date (2 pts)
+        let birth_evt = events.iter().find(|e| matches!(e.event_type, EventType::Birth));
+        if birth_evt.map(|e| e.date.is_some()).unwrap_or(false) {
+            score += 2;
+        } else {
+            missing.push("birth date");
+        }
+
+        // Birth place (1 pt)
+        if birth_evt.map(|e| e.place_id.is_some()).unwrap_or(false) {
+            score += 1;
+        } else {
+            missing.push("birth place");
+        }
+
+        // Known sex (1 pt)
+        if !matches!(person.sex, Sex::Unknown) {
+            score += 1;
+        } else {
+            missing.push("known sex");
+        }
+
+        // Death date (2 pts) — only if a death event exists
+        let death_evt = events.iter().find(|e| matches!(e.event_type, EventType::Death));
+        if let Some(death) = death_evt {
+            max += 2;
+            if death.date.is_some() {
+                score += 2;
+            } else {
+                missing.push("death date");
+            }
+        }
+
+        // Has relationship (1 pt)
+        if !rels.is_empty() {
+            score += 1;
+        } else {
+            missing.push("relationships");
+        }
+
+        // Has citation on any event (2 pts)
+        let has_citation = events.iter().any(|e| {
+            db.list_citations_for_event(&e.id)
+                .map(|c| !c.is_empty())
+                .unwrap_or(false)
+        });
+        if has_citation {
+            score += 2;
+        } else {
+            missing.push("source citations");
+        }
+
+        entries.push(Entry {
+            name: person.display_name(),
+            score,
+            max,
+            missing,
+        });
+    }
+
+    // Sort by score ascending (most incomplete first), then name
+    entries.sort_by(|a, b| {
+        let pct_a = (a.score as f32) / (a.max as f32);
+        let pct_b = (b.score as f32) / (b.max as f32);
+        pct_a.partial_cmp(&pct_b).unwrap().then(a.name.cmp(&b.name))
+    });
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Completeness ({} people)  ", entries.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(38).bright_black()
+    ));
+
+    if entries.is_empty() {
+        out.push_str(&format!("  {}\n", "(no people in database)".bright_black()));
+        return Ok(out);
+    }
+
+    for entry in &entries {
+        let pct = (entry.score as f32 / entry.max as f32 * 100.0) as u8;
+        let bar_len = (pct as usize * 20) / 100;
+        let bar = format!(
+            "{}{}",
+            "\u{2588}".repeat(bar_len),
+            "\u{2591}".repeat(20 - bar_len)
+        );
+        let bar_styled = if pct >= 80 {
+            bar.green()
+        } else if pct >= 50 {
+            bar.yellow()
+        } else {
+            bar.red()
+        };
+        let missing_str = if entry.missing.is_empty() {
+            String::new()
+        } else {
+            format!("  missing: {}", entry.missing.join(", ").bright_black())
+        };
+        out.push_str(&format!(
+            "  {} {:>3}%  {}  {}{}\n",
+            entry.name.bold(),
+            pct.to_string().yellow(),
+            bar_styled,
+            format!("{}/{}", entry.score, entry.max).bright_black(),
+            missing_str
+        ));
+    }
+
+    Ok(out)
+}

@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-28
-> **Build status:** 123 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.9.0
+> **Build status:** 107 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.11.0
 
 ---
 
@@ -98,9 +98,11 @@ Key design principles:
 | `kinforge report places` — places sorted by event count | ✅ Complete | — |
 | `individual_report` shows linked Research Tasks | ✅ Complete | tested |
 | Plugin API with event hooks (`PluginEvent`, `on_event`, `notify`, `unregister_all`) | ✅ Complete | 2 tests |
+| TUI: cite event popup (`C` key, source search + page, adds citation to selected event) | ✅ Complete | tested |
+| `kinforge report completeness` — per-person completeness score with colour bar | ✅ Complete | 2 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 123 tests passing, 0 failures, 0 warnings**
+**Total: 107 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -687,6 +689,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `/` in Sources tab — filter sources list by title (context-aware search mode)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
+
+**v1.11.0 (Phase 25):**
+- [x] TUI: `C` in person detail panel — cite selected event (source search popup with ↑/↓ cycling, optional page field)
+- [x] TUI: status bar updated — People detail shows J/K/X/C keys; Tasks shows `s: start`
+- [x] `kinforge report completeness` — per-person scoring (birth date, birth place, sex, death date, relationships, citations); sorted lowest first with colour bar
+- [x] Integration tests: 107 total (102 → 107)
 
 **v1.10.0 (Phase 24):**
 - [x] TUI: `J`/`K` in person detail panel — move relationship cursor; selected relationship highlighted with `»`

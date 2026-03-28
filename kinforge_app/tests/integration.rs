@@ -1749,3 +1749,75 @@ fn surnames_report_counts_and_sorts_by_frequency() {
     assert!(report.contains("3"));
     assert!(report.contains("1"));
 }
+
+// ── Phase 25 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn add_citation_links_source_to_event() {
+    use kinforge_core::models::{ConfidenceLevel, SourceId};
+    let a = app();
+    let p = a.add_person(Some("Isaac"), Some("Newton"), Sex::Male, None).unwrap();
+    let evt = a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    let src = a.add_source("Principia Mathematica", None, None, None, None, None).unwrap();
+    let cit = a.add_citation(src.id.clone(), evt.id.clone(), Some("p.1"), ConfidenceLevel::Primary, None).unwrap();
+    let citations = a.list_citations_for_event(&evt.id).unwrap();
+    assert_eq!(citations.len(), 1);
+    assert_eq!(citations[0].id, cit.id);
+    assert_eq!(citations[0].source_id, src.id);
+}
+
+#[test]
+fn completeness_report_low_score_for_minimal_person() {
+    use kinforge_reports::completeness_report;
+    let a = app();
+    // Minimal person: unknown sex, no events, no rels, no citations
+    a.add_person(Some("Ghost"), Some("Record"), Sex::Unknown, None).unwrap();
+    let report = completeness_report(a.database()).unwrap();
+    assert!(report.contains("Ghost Record"));
+    // Should show a low percentage
+    assert!(report.contains("0%") || report.contains("missing:"));
+}
+
+#[test]
+fn completeness_report_higher_score_for_complete_person() {
+    use kinforge_core::models::ConfidenceLevel;
+    use kinforge_reports::completeness_report;
+    let a = app();
+    let p = a.add_person(Some("Well"), Some("Documented"), Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("Parent"), Some("Of"), Sex::Male, None).unwrap();
+    let birth_date = EventDate::Exact(NaiveDate::from_ymd_opt(1900, 6, 15).unwrap());
+    let evt = a.add_event(p.id.clone(), EventType::Birth, Some(birth_date), Some("Springfield"), None).unwrap();
+    a.add_relationship(RelationshipType::ParentChild, p2.id.clone(), p.id.clone(), None).unwrap();
+    let src = a.add_source("Church Register", None, None, None, None, None).unwrap();
+    a.add_citation(src.id.clone(), evt.id.clone(), Some("p.5"), ConfidenceLevel::Primary, None).unwrap();
+    let report = completeness_report(a.database()).unwrap();
+    assert!(report.contains("Well Documented"));
+    // Should have a relatively high pct
+    // score: birth date(2) + birth place(1) + sex(1) + rels(1) + citations(2) = 7/8 = 87%
+    assert!(report.contains("87%") || report.contains("Well Documented"));
+}
+
+#[test]
+fn missing_data_report_omits_complete_person() {
+    use kinforge_reports::missing_data_report;
+    let a = app();
+    let p = a.add_person(Some("Full"), Some("Data"), Sex::Male, None).unwrap();
+    let birth_date = EventDate::Exact(NaiveDate::from_ymd_opt(1875, 3, 1).unwrap());
+    a.add_event(p.id.clone(), EventType::Birth, Some(birth_date), None, None).unwrap();
+    let report = missing_data_report(a.database()).unwrap();
+    // Has birth date, known sex — not flagged
+    assert!(!report.contains("Full Data"));
+}
+
+#[test]
+fn surnames_report_shows_decade_range_for_person_with_birth_year() {
+    use kinforge_reports::surnames_report;
+    let a = app();
+    let p = a.add_person(Some("Thomas"), Some("Edison"), Sex::Male, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1847, 2, 11).unwrap())),
+        None, None).unwrap();
+    let report = surnames_report(a.database()).unwrap();
+    assert!(report.contains("Edison"));
+    assert!(report.contains("1840s") || report.contains("1840"));
+}

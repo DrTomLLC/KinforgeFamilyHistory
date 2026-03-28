@@ -73,6 +73,7 @@ pub enum InputMode {
     EventCreate,
     EventEdit,
     RelationshipCreate,
+    CitationCreate,
 }
 
 // ── SortOrder ─────────────────────────────────────────────────────────────────
@@ -278,6 +279,14 @@ pub struct TuiState {
 
     // Task detail panel
     pub task_detail_open: bool,
+
+    // Inline citation creation (from person detail panel, selected event)
+    pub citation_event_id: Option<EventId>,
+    pub citation_source_buf: String,         // search fragment typed by user
+    pub citation_source_matches: Vec<(SourceId, String)>, // (id, title) filtered
+    pub citation_source_cursor: usize,       // which match is highlighted
+    pub citation_page_buf: String,
+    pub citation_field: u8,                  // 0 = source search, 1 = page
 }
 
 impl TuiState {
@@ -402,6 +411,12 @@ impl TuiState {
             person_notes_buf: String::new(),
             person_notes_id: None,
             task_detail_open: false,
+            citation_event_id: None,
+            citation_source_buf: String::new(),
+            citation_source_matches: vec![],
+            citation_source_cursor: 0,
+            citation_page_buf: String::new(),
+            citation_field: 0,
         })
     }
 

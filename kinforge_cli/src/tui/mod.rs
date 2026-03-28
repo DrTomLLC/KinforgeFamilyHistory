@@ -290,6 +290,28 @@ fn run(
                         }
                     }
 
+                    events::Action::AddCitation(eid, sid, page) => {
+                        let page_opt = if page.is_empty() { None } else { Some(page.as_str()) };
+                        let _ = app.add_citation(
+                            sid.clone(),
+                            eid,
+                            page_opt,
+                            kinforge_core::models::ConfidenceLevel::Secondary,
+                            None,
+                        );
+                        // If the source whose citation was just added is currently open in the
+                        // source detail panel, refresh citation list
+                        if let Some(src_row) = state.sources.iter().find(|s| s.id == sid) {
+                            let src_id = src_row.id.clone();
+                            if state.source_detail_open {
+                                state.source_detail_citations =
+                                    build_source_citation_rows(app, &src_id);
+                            }
+                        }
+                        // Reload sources to update citation counts
+                        state.reload_sources(app);
+                    }
+
                     events::Action::None => {}
                 }
             }
