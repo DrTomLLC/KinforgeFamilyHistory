@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-28
-> **Build status:** 112 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.12.0
+> **Build status:** 117 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.13.0
 
 ---
 
@@ -105,7 +105,7 @@ Key design principles:
 | `kinforge report anniversary [--days N]` — upcoming birth/marriage anniversaries | ✅ Complete | 3 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 112 tests passing, 0 failures, 0 warnings**
+**Total: 117 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -629,10 +629,8 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 
 | Feature | Notes |
 |---------|-------|
-| Desktop GUI | `kinforge_ui_desktop` stub only; no UI framework chosen |
-| Cloud/peer sync | `kinforge_sync` stub only |
-| Plugin loading | Trait defined; no loader or host |
-| In-place name editing | `person update-name` / `person delete-name` commands available |
+| Cloud/peer sync | `kinforge_sync` stub only — planned as the final phase |
+| Dynamic plugin loading from .so/.dll | Plugin trait and built-in plugins complete; runtime dylib loading not yet implemented |
 
 ---
 
@@ -693,6 +691,13 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
 
+**v1.13.0 (Phase 27):**
+- [x] Plugin system wired into `Application`: `register_plugin()`, `plugin_count()`, live event dispatch in `add_person`, `add_event`, `add_relationship`, `add_task`
+- [x] Two built-in example plugins: `ConsoleLogPlugin` (logs all events to stderr) and `EventCounterPlugin` (tallies by type, reports on unload)
+- [x] `kinforge plugin list` — CLI command listing built-in plugins with IDs and descriptions
+- [x] Desktop GUI (`kinforge-desktop` binary) — functional egui/eframe app: people list with search, person detail (events + relationships collapsible), stats sidebar, menu bar, sex colour dots, status bar
+- [x] Integration tests: 117 total (112 → 117)
+
 **v1.12.0 (Phase 26):**
 - [x] TUI: `?` key — context-sensitive keyboard shortcut help popup (different content per tab and panel state)
 - [x] TUI: `N` in Tasks tab — edit task notes via single-line popup (works from list and task detail panel)
@@ -726,7 +731,5 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `Enter` in Tasks tab — toggle task detail panel (status, priority, full description, notes, created date)
 - [x] `kinforge report birthdays` — annual birthday reference sorted by month/day
 
-**Future:**
-- [ ] Desktop GUI (`kinforge_ui_desktop`)
+**Future (Cloud Sync — final phase):**
 - [ ] Optional sync between devices (`kinforge_sync`)
-- [ ] Plugin loading at runtime (`kinforge_plugin_api`)

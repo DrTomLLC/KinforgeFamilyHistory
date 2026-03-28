@@ -79,3 +79,122 @@ impl PluginRegistry {
         self.plugins.clear();
     }
 }
+
+// ─── Built-in example plugins ────────────────────────────────────────────────
+
+/// A plugin that prints every database event to stderr.
+///
+/// Useful for debugging and as a reference implementation.
+///
+/// # Example
+/// ```rust
+/// use kinforge_plugin_api::{PluginRegistry, plugins::ConsoleLogPlugin};
+/// let mut registry = PluginRegistry::new();
+/// registry.register(Box::new(ConsoleLogPlugin::new())).unwrap();
+/// ```
+pub mod plugins {
+    use super::{KinforgePlugin, KinforgeResult, PluginEvent};
+
+    /// Logs every plugin event to stderr.
+    pub struct ConsoleLogPlugin {
+        prefix: String,
+    }
+
+    impl ConsoleLogPlugin {
+        pub fn new() -> Self {
+            Self { prefix: "[kinforge]".to_string() }
+        }
+
+        pub fn with_prefix(prefix: impl Into<String>) -> Self {
+            Self { prefix: prefix.into() }
+        }
+    }
+
+    impl Default for ConsoleLogPlugin {
+        fn default() -> Self { Self::new() }
+    }
+
+    impl KinforgePlugin for ConsoleLogPlugin {
+        fn id(&self) -> &str { "builtin.console_log" }
+        fn name(&self) -> &str { "Console Logger" }
+        fn version(&self) -> &str { env!("CARGO_PKG_VERSION") }
+
+        fn on_load(&mut self) -> KinforgeResult<()> {
+            eprintln!("{} ConsoleLogPlugin loaded", self.prefix);
+            Ok(())
+        }
+
+        fn on_unload(&mut self) -> KinforgeResult<()> {
+            eprintln!("{} ConsoleLogPlugin unloaded", self.prefix);
+            Ok(())
+        }
+
+        fn on_event(&mut self, event: &PluginEvent) {
+            match event {
+                PluginEvent::PersonAdded { name } =>
+                    eprintln!("{} person added: {}", self.prefix, name),
+                PluginEvent::EventAdded { event_type, person_name } =>
+                    eprintln!("{} event added: {} for {}", self.prefix, event_type, person_name),
+                PluginEvent::RelationshipAdded { rel_type } =>
+                    eprintln!("{} relationship added: {}", self.prefix, rel_type),
+                PluginEvent::TaskAdded { description } =>
+                    eprintln!("{} task added: {}", self.prefix, description),
+            }
+        }
+    }
+
+    /// Counts how many of each event type were fired during its lifetime.
+    ///
+    /// Call `summary()` to retrieve the counts, or they are printed to stderr
+    /// on `on_unload`.
+    pub struct EventCounterPlugin {
+        pub people_added: usize,
+        pub events_added: usize,
+        pub relationships_added: usize,
+        pub tasks_added: usize,
+    }
+
+    impl EventCounterPlugin {
+        pub fn new() -> Self {
+            Self {
+                people_added: 0,
+                events_added: 0,
+                relationships_added: 0,
+                tasks_added: 0,
+            }
+        }
+
+        /// Returns a human-readable summary string.
+        pub fn summary(&self) -> String {
+            format!(
+                "EventCounter: {} people  {} events  {} relationships  {} tasks",
+                self.people_added, self.events_added,
+                self.relationships_added, self.tasks_added
+            )
+        }
+    }
+
+    impl Default for EventCounterPlugin {
+        fn default() -> Self { Self::new() }
+    }
+
+    impl KinforgePlugin for EventCounterPlugin {
+        fn id(&self) -> &str { "builtin.event_counter" }
+        fn name(&self) -> &str { "Event Counter" }
+        fn version(&self) -> &str { env!("CARGO_PKG_VERSION") }
+
+        fn on_unload(&mut self) -> KinforgeResult<()> {
+            eprintln!("{}", self.summary());
+            Ok(())
+        }
+
+        fn on_event(&mut self, event: &PluginEvent) {
+            match event {
+                PluginEvent::PersonAdded { .. } => self.people_added += 1,
+                PluginEvent::EventAdded { .. } => self.events_added += 1,
+                PluginEvent::RelationshipAdded { .. } => self.relationships_added += 1,
+                PluginEvent::TaskAdded { .. } => self.tasks_added += 1,
+            }
+        }
+    }
+}

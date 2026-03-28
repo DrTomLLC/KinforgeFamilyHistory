@@ -1896,3 +1896,132 @@ fn anniversary_report_shows_years_since_for_birth() {
     // Should appear (0 days window = today only)
     assert!(report.contains("Centennial Ancestor"));
 }
+
+// ── Phase 27 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn plugin_registry_fires_event_on_add_person() {
+    use kinforge_plugin_api::plugins::EventCounterPlugin;
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    // Use a shared counter to observe events
+    let counter = Arc::new(Mutex::new(0usize));
+    let counter_clone = counter.clone();
+
+    struct TestPlugin(Arc<Mutex<usize>>);
+    impl KinforgePlugin for TestPlugin {
+        fn id(&self) -> &str { "test.counter" }
+        fn name(&self) -> &str { "Test Counter" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            if matches!(event, kinforge_plugin_api::PluginEvent::PersonAdded { .. }) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(TestPlugin(counter_clone))).unwrap();
+    a.add_person(Some("Plugin"), Some("Test"), Sex::Male, None).unwrap();
+    a.add_person(Some("Second"), Some("Person"), Sex::Female, None).unwrap();
+    assert_eq!(*counter.lock().unwrap(), 2);
+}
+
+#[test]
+fn plugin_event_counter_counts_correctly() {
+    use kinforge_plugin_api::plugins::EventCounterPlugin;
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    // Wrap EventCounterPlugin to inspect it after use
+    let counts = Arc::new(Mutex::new((0usize, 0usize))); // (people, events)
+    let counts_clone = counts.clone();
+
+    struct WrapPlugin(Arc<Mutex<(usize, usize)>>);
+    impl KinforgePlugin for WrapPlugin {
+        fn id(&self) -> &str { "wrap" }
+        fn name(&self) -> &str { "Wrap" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            let mut c = self.0.lock().unwrap();
+            match event {
+                kinforge_plugin_api::PluginEvent::PersonAdded { .. } => c.0 += 1,
+                kinforge_plugin_api::PluginEvent::EventAdded { .. } => c.1 += 1,
+                _ => {}
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(WrapPlugin(counts_clone))).unwrap();
+    let p = a.add_person(Some("Count"), Some("Test"), Sex::Unknown, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Death, None, None, None).unwrap();
+    let c = *counts.lock().unwrap();
+    assert_eq!(c.0, 1); // one person
+    assert_eq!(c.1, 2); // two events
+}
+
+#[test]
+fn plugin_count_reflects_registered_plugins() {
+    use kinforge_plugin_api::plugins::ConsoleLogPlugin;
+    let a = app();
+    assert_eq!(a.plugin_count(), 0);
+    a.register_plugin(Box::new(ConsoleLogPlugin::new())).unwrap();
+    assert_eq!(a.plugin_count(), 1);
+}
+
+#[test]
+fn plugin_fires_task_added_event() {
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    let fired = Arc::new(Mutex::new(false));
+    let fired_clone = fired.clone();
+
+    struct TaskWatcher(Arc<Mutex<bool>>);
+    impl KinforgePlugin for TaskWatcher {
+        fn id(&self) -> &str { "task.watcher" }
+        fn name(&self) -> &str { "Task Watcher" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            if matches!(event, kinforge_plugin_api::PluginEvent::TaskAdded { .. }) {
+                *self.0.lock().unwrap() = true;
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(TaskWatcher(fired_clone))).unwrap();
+    a.add_task("Research church records", None, TaskPriority::High, None).unwrap();
+    assert!(*fired.lock().unwrap());
+}
+
+#[test]
+fn plugin_fires_relationship_added_event() {
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    let fired = Arc::new(Mutex::new(String::new()));
+    let fired_clone = fired.clone();
+
+    struct RelWatcher(Arc<Mutex<String>>);
+    impl KinforgePlugin for RelWatcher {
+        fn id(&self) -> &str { "rel.watcher" }
+        fn name(&self) -> &str { "Rel Watcher" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            if let kinforge_plugin_api::PluginEvent::RelationshipAdded { rel_type } = event {
+                *self.0.lock().unwrap() = rel_type.clone();
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(RelWatcher(fired_clone))).unwrap();
+    let p1 = a.add_person(Some("Parent"), Some("A"), Sex::Male, None).unwrap();
+    let p2 = a.add_person(Some("Child"), Some("A"), Sex::Female, None).unwrap();
+    a.add_relationship(RelationshipType::ParentChild, p1.id, p2.id, None).unwrap();
+    assert!(!fired.lock().unwrap().is_empty());
+}

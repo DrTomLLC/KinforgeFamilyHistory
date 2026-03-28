@@ -8,6 +8,7 @@ pub mod export;
 pub mod import;
 pub mod person;
 pub mod place;
+pub mod plugin;
 pub mod relationship;
 pub mod report;
 pub mod search;

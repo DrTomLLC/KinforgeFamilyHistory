@@ -9,9 +9,9 @@ mod tui;
 use commands::{
     backup::BackupCommands, citation::CitationCommands, config::ConfigCommands, event::EventCommands,
     export::ExportCommands, import::ImportCommands, media::MediaCommands,
-    person::PersonCommands, place::PlaceCommands, relationship::RelationshipCommands,
-    report::ReportCommands, search::SearchCommands, source::SourceCommands,
-    task::TaskCommands,
+    person::PersonCommands, place::PlaceCommands, plugin::PluginCommands,
+    relationship::RelationshipCommands, report::ReportCommands, search::SearchCommands,
+    source::SourceCommands, task::TaskCommands,
 };
 
 #[derive(Parser)]
@@ -111,6 +111,10 @@ enum Commands {
     /// Manage database backups
     #[command(subcommand)]
     Backup(BackupCommands),
+
+    /// List and manage Kinforge plugins
+    #[command(subcommand)]
+    Plugin(PluginCommands),
 }
 
 fn main() -> Result<()> {
@@ -152,6 +156,7 @@ fn main() -> Result<()> {
         Commands::Reminders { days } => commands::reminders::handle(days, &app)?,
         Commands::Check => commands::check::handle(&app)?,
         Commands::Backup(cmd) => commands::backup::handle(cmd, &app)?,
+        Commands::Plugin(cmd) => commands::plugin::handle(cmd)?,
         Commands::Config(_) => unreachable!(),
     }
 

@@ -11,3 +11,7 @@ path = "src/main.rs"
 [dependencies]
 kinforge_app = { workspace = true }
 kinforge_core = { workspace = true }
+kinforge_config = { workspace = true }
+kinforge_reports = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
