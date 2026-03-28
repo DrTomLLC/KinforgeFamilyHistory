@@ -1380,3 +1380,69 @@ pub fn summary_report(db: &Database) -> KinforgeResult<String> {
 
     Ok(out)
 }
+
+// ─── birthdays report ────────────────────────────────────────────────────────
+
+/// Annual birthday reference: all people with known birth month+day, sorted by month then day.
+pub fn birthdays_report(db: &Database) -> KinforgeResult<String> {
+    use chrono::Datelike;
+
+    let people = db.list_people()?;
+    let mut entries: Vec<(u32, u32, i32, String, Option<String>)> = Vec::new();
+    // (month, day, birth_year, display_name, place_name)
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id)?;
+        if let Some(birth) = events.iter().find(|e| matches!(e.event_type, EventType::Birth)) {
+            if let Some(nd) = birth.date.as_ref().and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(*nd),
+                _ => None,
+            }) {
+                let place_name = birth.place_id.as_ref()
+                    .and_then(|pid| db.get_place(pid).ok())
+                    .map(|pl| pl.name);
+                entries.push((nd.month(), nd.day(), nd.year(), person.display_name(), place_name));
+            }
+        }
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+
+    let month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ];
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Birthdays ({} with known date)  ", entries.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(38).bright_black()
+    ));
+
+    if entries.is_empty() {
+        out.push_str(&format!("  {}\n", "(no birth dates recorded)".bright_black()));
+        return Ok(out);
+    }
+
+    let mut current_month = 0u32;
+    for (month, day, year, name, place) in &entries {
+        if *month != current_month {
+            current_month = *month;
+            out.push_str(&format!("\n  {}\n", month_names[*month as usize].bold().cyan()));
+        }
+        let place_str = place.as_deref()
+            .map(|p| format!("  @ {}", p.green()))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "    {:>2}  {}  {}{}\n",
+            day.to_string().yellow().bold(),
+            name.bold(),
+            year.to_string().bright_black(),
+            place_str
+        ));
+    }
+
+    Ok(out)
+}

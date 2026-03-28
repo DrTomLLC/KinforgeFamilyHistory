@@ -66,6 +66,7 @@ pub enum InputMode {
     TaskEdit,
     PersonCreate,
     PersonEdit,
+    PersonNotesEdit,
     SourceCreate,
     SourceEdit,
     ConfirmDelete,
@@ -255,6 +256,13 @@ pub struct TuiState {
     pub rel_create_type_idx: usize,     // index into TUI_REL_TYPES
     pub rel_create_field: u8,           // 0 = person2 name, 1 = rel type
     pub rel_create_person1_id: Option<PersonId>,
+
+    // Inline person notes edit
+    pub person_notes_buf: String,
+    pub person_notes_id: Option<PersonId>,
+
+    // Task detail panel
+    pub task_detail_open: bool,
 }
 
 impl TuiState {
@@ -366,6 +374,9 @@ impl TuiState {
             rel_create_type_idx: 0,
             rel_create_field: 0,
             rel_create_person1_id: None,
+            person_notes_buf: String::new(),
+            person_notes_id: None,
+            task_detail_open: false,
         })
     }
 

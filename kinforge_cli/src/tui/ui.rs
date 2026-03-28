@@ -89,6 +89,9 @@ fn draw_people(frame: &mut Frame, state: &TuiState, area: Rect) {
     if state.mode == InputMode::RelationshipCreate {
         draw_rel_create_popup(frame, state, area);
     }
+    if state.mode == InputMode::PersonNotesEdit {
+        draw_person_notes_popup(frame, state, area);
+    }
 }
 
 fn draw_confirm_delete_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -314,6 +317,28 @@ fn draw_rel_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
     frame.render_widget(para, popup_area);
 }
 
+fn draw_person_notes_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let popup_width = 64_u16.min(area.width.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + area.height / 2 - 1;
+    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: 3 };
+
+    let input_display = format!("  {}_", state.person_notes_buf);
+    let para = Paragraph::new(Line::from(Span::styled(
+        input_display,
+        Style::default().fg(Color::White),
+    )))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Edit Notes — Enter: save · Esc: cancel ")
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(para, popup_area);
+}
+
 fn draw_people_list(frame: &mut Frame, state: &TuiState, area: Rect) {
     let sort_badge = format!("[sort: {}]", state.sort_order.label());
     let title = if state.search_active {
@@ -497,6 +522,26 @@ fn draw_person_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
 // ── Tasks tab ─────────────────────────────────────────────────────────────────
 
 fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
+    if state.task_detail_open {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(area);
+        draw_tasks_list(frame, state, chunks[0]);
+        draw_task_detail(frame, state, chunks[1]);
+    } else {
+        draw_tasks_list(frame, state, area);
+    }
+
+    if state.mode == InputMode::TaskCreate {
+        draw_task_create_popup(frame, state, area);
+    }
+    if state.mode == InputMode::TaskEdit {
+        draw_task_edit_popup(frame, state, area);
+    }
+}
+
+fn draw_tasks_list(frame: &mut Frame, state: &TuiState, area: Rect) {
     let items: Vec<ListItem> = state
         .task_rows
         .iter()
@@ -582,14 +627,105 @@ fn draw_tasks(frame: &mut Frame, state: &TuiState, area: Rect) {
         .highlight_symbol("» ");
 
     frame.render_stateful_widget(list, area, &mut list_state);
+}
 
-    // Render popups on top
-    if state.mode == InputMode::TaskCreate {
-        draw_task_create_popup(frame, state, area);
+fn draw_task_detail(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let task = if let Some(TaskRow::Item(idx)) = state.task_rows.get(state.tasks_selected) {
+        state.tasks.get(*idx)
+    } else {
+        None
+    };
+
+    let mut lines: Vec<Line> = vec![Line::from("")];
+
+    if let Some(task) = task {
+        // Status + priority badges
+        let status_str = match task.status {
+            TaskStatus::Pending => "Pending",
+            TaskStatus::InProgress => "In Progress",
+            TaskStatus::Done => "Done",
+        };
+        let status_color = match task.status {
+            TaskStatus::Pending => Color::White,
+            TaskStatus::InProgress => Color::Yellow,
+            TaskStatus::Done => Color::Green,
+        };
+        let prio_str = match task.priority {
+            TaskPriority::Low => "Low",
+            TaskPriority::Medium => "Medium",
+            TaskPriority::High => "High",
+        };
+        let prio_color = match task.priority {
+            TaskPriority::Low => Color::DarkGray,
+            TaskPriority::Medium => Color::Yellow,
+            TaskPriority::High => Color::Red,
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("  Status    ", Style::default().fg(Color::Cyan)),
+            Span::styled(status_str, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  Priority  ", Style::default().fg(Color::Cyan)),
+            Span::styled(prio_str, Style::default().fg(prio_color).add_modifier(Modifier::BOLD)),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            " Description",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            " ────────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+        // Wrap description manually at ~50 chars
+        for chunk in task.description.chars().collect::<Vec<_>>().chunks(50) {
+            let s: String = chunk.iter().collect();
+            lines.push(Line::from(Span::raw(format!("  {}", s))));
+        }
+
+        if let Some(ref notes) = task.notes {
+            if !notes.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    " Notes",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from(Span::styled(
+                    " ────────────────────────────────",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                for note_line in notes.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", note_line),
+                        Style::default().fg(Color::White),
+                    )));
+                }
+            }
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("  Created   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&task.created[..10.min(task.created.len())], Style::default().fg(Color::DarkGray)),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  (no task selected)",
+            Style::default().fg(Color::DarkGray),
+        )));
     }
-    if state.mode == InputMode::TaskEdit {
-        draw_task_edit_popup(frame, state, area);
-    }
+
+    let para = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Task Detail  Esc / Enter: close ")
+                .border_style(Style::default().fg(Color::Yellow)),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(para, area);
 }
 
 fn draw_task_create_popup(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -1067,16 +1203,23 @@ fn draw_status(frame: &mut Frame, state: &TuiState, area: Rect) {
         InputMode::EventCreate => " Tab: next field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::RelationshipCreate => " Tab: switch field  ←/→: cycle type  Enter: save  Esc: cancel".to_string(),
         InputMode::SourceEdit => " Tab: switch field  Enter: save  Esc: cancel".to_string(),
+        InputMode::PersonNotesEdit => " Type notes  Enter: save  Esc: cancel".to_string(),
         InputMode::Normal => match state.active_tab {
             Tab::People => {
                 if state.detail_open {
-                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  r: add rel  e: edit name  Tab: next  q: quit".to_string()
+                    " ESC/Enter: close  ↑↓/jk: scroll  a: add event  r: add rel  e: edit name  N: notes  Tab: next  q: quit".to_string()
                 } else {
-                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  s: sort  x: delete  /: search  Enter: detail  q: quit"
+                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  N: notes  s: sort  x: delete  /: search  Enter: detail  q: quit"
                         .to_string()
                 }
             }
-            Tab::Tasks => " Tab: next  ↑↓/jk  g/G  n: new  e: edit  d/c: done  p: priority  x: delete  f: filter  q: quit".to_string(),
+            Tab::Tasks => {
+                if state.task_detail_open {
+                    " Enter/Esc: close detail  ↑↓/jk  d/c: done  e: edit  p: priority  Tab: next  q: quit".to_string()
+                } else {
+                    " Tab: next  ↑↓/jk  g/G  n: new  e: edit  d/c: done  p: priority  x: delete  f: filter  Enter: detail  q: quit".to_string()
+                }
+            }
             Tab::Sources => {
                 if state.source_detail_open {
                     " ESC/Enter: close  ↑↓/jk: scroll  Tab: next  q: quit".to_string()

@@ -24,6 +24,7 @@ pub enum Action {
     EditTask(TaskId, String, kinforge_core::models::TaskPriority),
     CreateRelationship(PersonId, String, PersonId), // (person1, rel_type_token, person2)
     EditSource(SourceId, String, String, Option<i32>), // (id, title, author, year)
+    UpdatePersonNotes(PersonId, String),                // (id, notes text)
 }
 
 pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
@@ -49,6 +50,7 @@ pub fn handle_key(state: &mut TuiState, key: KeyEvent) -> Action {
         InputMode::TaskEdit => handle_task_edit(state, key),
         InputMode::RelationshipCreate => handle_rel_create(state, key),
         InputMode::SourceEdit => handle_source_edit(state, key),
+        InputMode::PersonNotesEdit => handle_person_notes_edit(state, key),
     }
 }
 
@@ -61,12 +63,14 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             // Close open detail panels when switching tabs
             state.detail_open = false;
             state.source_detail_open = false;
+            state.task_detail_open = false;
             Action::None
         }
         KeyCode::BackTab => {
             state.active_tab = state.active_tab.prev();
             state.detail_open = false;
             state.source_detail_open = false;
+            state.task_detail_open = false;
             Action::None
         }
 
@@ -207,6 +211,14 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
                     Action::None
                 }
             }
+            Tab::Tasks => {
+                if state.task_detail_open {
+                    state.task_detail_open = false;
+                } else if matches!(state.task_rows.get(state.tasks_selected), Some(TaskRow::Item(_))) {
+                    state.task_detail_open = true;
+                }
+                Action::None
+            }
             Tab::Sources => {
                 if state.source_detail_open {
                     state.source_detail_open = false;
@@ -314,6 +326,22 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             Action::None
         }
 
+        // Edit person notes: press 'N' in People tab (list or detail)
+        KeyCode::Char('N') if state.active_tab == Tab::People => {
+            let pid = if state.detail_open {
+                state.detail_person_id.clone()
+            } else {
+                state.selected_person().map(|r| r.id.clone())
+            };
+            if let Some(pid) = pid {
+                let existing = state.detail_notes.clone().unwrap_or_default();
+                state.person_notes_buf = existing;
+                state.person_notes_id = Some(pid);
+                state.mode = InputMode::PersonNotesEdit;
+            }
+            Action::None
+        }
+
         // Add relationship: press 'r' in People tab when detail is open
         KeyCode::Char('r') if state.active_tab == Tab::People && state.detail_open => {
             if let Some(pid) = state.detail_person_id.clone() {
@@ -412,6 +440,8 @@ fn handle_normal(state: &mut TuiState, key: KeyEvent) -> Action {
             } else if state.source_detail_open {
                 state.source_detail_open = false;
                 state.source_detail_scroll = 0;
+            } else if state.task_detail_open {
+                state.task_detail_open = false;
             }
             Action::None
         }
@@ -796,6 +826,31 @@ fn handle_source_edit(state: &mut TuiState, key: KeyEvent) -> Action {
                 2 if c.is_ascii_digit() || c == '-' => state.source_edit_year.push(c),
                 _ => {}
             }
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn handle_person_notes_edit(state: &mut TuiState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.mode = InputMode::Normal;
+            state.person_notes_id = None;
+        }
+        KeyCode::Enter => {
+            if let Some(pid) = state.person_notes_id.take() {
+                let notes = state.person_notes_buf.trim().to_string();
+                state.mode = InputMode::Normal;
+                return Action::UpdatePersonNotes(pid, notes);
+            }
+            state.mode = InputMode::Normal;
+        }
+        KeyCode::Backspace => {
+            state.person_notes_buf.pop();
+        }
+        KeyCode::Char(c) => {
+            state.person_notes_buf.push(c);
         }
         _ => {}
     }

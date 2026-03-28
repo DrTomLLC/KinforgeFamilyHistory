@@ -72,6 +72,7 @@ fn run(
 
                     events::Action::CompleteTask(tid) => {
                         let _ = app.complete_task(&tid);
+                        state.task_detail_open = false;
                         state.reload_tasks(app);
                     }
 
@@ -192,6 +193,17 @@ fn run(
                             state.reload_sources(app);
                             if state.sources_selected >= state.filtered_sources.len() {
                                 state.sources_selected = state.filtered_sources.len().saturating_sub(1);
+                            }
+                        }
+                    }
+
+                    events::Action::UpdatePersonNotes(pid, notes) => {
+                        if let Ok(mut person) = app.get_person(&pid) {
+                            person.notes = if notes.is_empty() { None } else { Some(notes.clone()) };
+                            let _ = app.update_person(person);
+                            // Refresh detail panel notes if this person is open
+                            if state.detail_person_id.as_ref() == Some(&pid) {
+                                state.detail_notes = if notes.is_empty() { None } else { Some(notes) };
                             }
                         }
                     }

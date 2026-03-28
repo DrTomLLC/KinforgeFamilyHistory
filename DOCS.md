@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
-> **Last updated:** 2026-03-27
-> **Build status:** 113 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.7.0
+> **Last updated:** 2026-03-28
+> **Build status:** 118 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.8.0
 
 ---
 
@@ -97,10 +97,10 @@ Key design principles:
 | `kinforge export markdown` — Markdown family register | ✅ Complete | — |
 | `kinforge report places` — places sorted by event count | ✅ Complete | — |
 | `individual_report` shows linked Research Tasks | ✅ Complete | tested |
-| Plugin API skeleton | ✅ Skeleton present | — |
+| Plugin API with event hooks (`PluginEvent`, `on_event`, `notify`, `unregister_all`) | ✅ Complete | 2 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
 
-**Total: 113 tests passing, 0 failures, 0 warnings**
+**Total: 118 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -431,6 +431,7 @@ kinforge report places
 kinforge report summary
 kinforge report path --from <ID> --to <ID>
 kinforge report global-timeline [--limit <N>]
+kinforge report birthdays
 ```
 
 `--detailed` adds a birth-decade histogram and top-10 surname frequency table.
@@ -438,6 +439,8 @@ kinforge report global-timeline [--limit <N>]
 `report path` prints the shortest relationship path between two people (BFS) with the number of degrees of separation.
 
 `report global-timeline` lists all events across all people in chronological order. Defaults to 200 events; use `--limit` to adjust.
+
+`report birthdays` lists all people with a known birth month and day, sorted by month then day — useful as an annual birthday reference card.
 
 ### `search`
 
@@ -548,6 +551,8 @@ Opens an interactive terminal UI with four tabs:
 | `f` | Tasks | Cycle status filter (All → Pending → In Progress → Done → All) |
 | `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
 | `r` | People (detail open) | Open add-relationship popup (type ←/→, person name search) |
+| `N` | People | Open notes editor popup (prefilled with existing notes) |
+| `Enter` | Tasks | Open task detail panel (status, priority, notes, created date) |
 | `x` | People | Open confirm-delete popup for selected person |
 | `e` | Sources | Edit selected source (title, author, year; prefilled popup) |
 | `/` | Sources | Enter search/filter mode for source titles |
@@ -677,6 +682,12 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `/` in Sources tab — filter sources list by title (context-aware search mode)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
+
+**v1.8.0 (Phase 22):**
+- [x] Plugin API: `PluginEvent` enum with lifecycle hooks (`on_event`); `PluginRegistry::notify()` dispatches to all plugins; `unregister_all()` calls `on_unload` on each
+- [x] TUI: `N` in People tab — edit person notes via prefilled single-line popup (works from list and detail panel)
+- [x] TUI: `Enter` in Tasks tab — toggle task detail panel (status, priority, full description, notes, created date)
+- [x] `kinforge report birthdays` — annual birthday reference sorted by month/day
 
 **Future:**
 - [ ] Desktop GUI (`kinforge_ui_desktop`)

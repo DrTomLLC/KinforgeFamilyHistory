@@ -1496,3 +1496,114 @@ fn source_filter_by_title_substring() {
     assert_eq!(matching.len(), 2);
     assert!(matching.iter().all(|s| s.title.contains("Census")));
 }
+
+// ── Phase 22 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn plugin_registry_registers_and_notifies() {
+    use kinforge_plugin_api::{KinforgePlugin, PluginEvent, PluginRegistry};
+    use std::sync::{Arc, Mutex};
+
+    struct CounterPlugin {
+        count: Arc<Mutex<usize>>,
+    }
+    impl KinforgePlugin for CounterPlugin {
+        fn id(&self) -> &str { "counter" }
+        fn name(&self) -> &str { "Counter" }
+        fn version(&self) -> &str { "0.1" }
+        fn on_event(&mut self, _event: &PluginEvent) {
+            *self.count.lock().unwrap() += 1;
+        }
+    }
+
+    let count = Arc::new(Mutex::new(0usize));
+    let mut registry = PluginRegistry::new();
+    registry.register(Box::new(CounterPlugin { count: count.clone() })).unwrap();
+    assert_eq!(registry.plugin_count(), 1);
+
+    registry.notify(&PluginEvent::PersonAdded { name: "Alice".to_string() });
+    registry.notify(&PluginEvent::TaskAdded { description: "Research".to_string() });
+    assert_eq!(*count.lock().unwrap(), 2);
+}
+
+#[test]
+fn plugin_unregister_all_calls_on_unload() {
+    use kinforge_core::KinforgeResult;
+    use kinforge_plugin_api::{KinforgePlugin, PluginRegistry};
+    use std::sync::{Arc, Mutex};
+
+    struct UnloadPlugin {
+        unloaded: Arc<Mutex<bool>>,
+    }
+    impl KinforgePlugin for UnloadPlugin {
+        fn id(&self) -> &str { "unload-test" }
+        fn name(&self) -> &str { "Unload Test" }
+        fn version(&self) -> &str { "0.1" }
+        fn on_unload(&mut self) -> KinforgeResult<()> {
+            *self.unloaded.lock().unwrap() = true;
+            Ok(())
+        }
+    }
+
+    let unloaded = Arc::new(Mutex::new(false));
+    let mut registry = PluginRegistry::new();
+    registry.register(Box::new(UnloadPlugin { unloaded: unloaded.clone() })).unwrap();
+    registry.unregister_all();
+    assert_eq!(registry.plugin_count(), 0);
+    assert!(*unloaded.lock().unwrap());
+}
+
+#[test]
+fn person_notes_update_persists() {
+    let a = app();
+    let p = a.add_person(Some("Walt"), Some("Whitman"), Sex::Male, None).unwrap();
+    let mut person = a.get_person(&p.id).unwrap();
+    person.notes = Some("American poet, journalist, and essayist.".to_string());
+    a.update_person(person).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert_eq!(
+        retrieved.notes.as_deref(),
+        Some("American poet, journalist, and essayist.")
+    );
+}
+
+#[test]
+fn person_notes_cleared_when_empty() {
+    let a = app();
+    let p = a.add_person(Some("Emily"), Some("Dickinson"), Sex::Female, None).unwrap();
+    let mut person = a.get_person(&p.id).unwrap();
+    person.notes = Some("Poet".to_string());
+    a.update_person(person).unwrap();
+    // Now clear notes
+    let mut person2 = a.get_person(&p.id).unwrap();
+    person2.notes = None;
+    a.update_person(person2).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert!(retrieved.notes.is_none());
+}
+
+#[test]
+fn birthdays_report_sorted_by_month_day() {
+    use kinforge_reports::birthdays_report;
+    let a = app();
+    let p1 = a.add_person(Some("June"), Some("First"), Sex::Female, None).unwrap();
+    a.add_event(p1.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1900, 6, 1).unwrap())),
+        None, None).unwrap();
+    let p2 = a.add_person(Some("March"), Some("Fifteenth"), Sex::Male, None).unwrap();
+    a.add_event(p2.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1855, 3, 15).unwrap())),
+        None, None).unwrap();
+    let p3 = a.add_person(Some("January"), Some("Third"), Sex::Unknown, None).unwrap();
+    a.add_event(p3.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1920, 1, 3).unwrap())),
+        None, None).unwrap();
+    let report = birthdays_report(a.database()).unwrap();
+    // January should come before March, which should come before June
+    let pos_jan = report.find("January").unwrap();
+    let pos_mar = report.find("March").unwrap();
+    let pos_jun = report.find("June").unwrap();
+    assert!(pos_jan < pos_mar, "January should appear before March");
+    assert!(pos_mar < pos_jun, "March should appear before June");
+    assert!(report.contains("3 with known date") || report.contains("Birthdays"));
+}

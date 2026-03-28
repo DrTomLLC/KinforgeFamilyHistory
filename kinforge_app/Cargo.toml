@@ -16,3 +16,4 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 kinforge_reports = { workspace = true }
+kinforge_plugin_api = { workspace = true }
