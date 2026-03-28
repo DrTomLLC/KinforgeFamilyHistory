@@ -10,6 +10,7 @@ kinforge_storage = { workspace = true }
 kinforge_config = { workspace = true }
 kinforge_query = { workspace = true }
 kinforge_import_export = { workspace = true }
+kinforge_plugin_api = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }

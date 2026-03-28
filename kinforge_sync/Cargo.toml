@@ -6,3 +6,12 @@ license.workspace = true
 
 [dependencies]
 kinforge_core = { workspace = true }
+kinforge_storage = { workspace = true }
+kinforge_import_export = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+kinforge_app = { workspace = true }

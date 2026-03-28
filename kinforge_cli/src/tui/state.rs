@@ -66,11 +66,16 @@ pub enum InputMode {
     TaskEdit,
     PersonCreate,
     PersonEdit,
+    PersonNotesEdit,
     SourceCreate,
     SourceEdit,
     ConfirmDelete,
     EventCreate,
+    EventEdit,
     RelationshipCreate,
+    CitationCreate,
+    Help,
+    TaskNotesEdit,
 }
 
 // ── SortOrder ─────────────────────────────────────────────────────────────────
@@ -167,10 +172,12 @@ pub struct TuiState {
     pub detail_person_id: Option<PersonId>,
     pub detail_events: Vec<Event>,
     pub detail_event_places: Vec<Option<String>>, // parallel to detail_events
-    pub detail_rel_rows: Vec<(String, String)>, // (label, other name)
+    pub detail_rel_rows: Vec<(String, String, RelationshipId)>, // (label, other name, rel_id)
     pub detail_scroll: usize,
     pub detail_notes: Option<String>,
     pub detail_media_count: usize,
+    pub detail_event_cursor: usize, // which event is "selected" in the detail panel
+    pub detail_rel_cursor: usize,   // which relationship is "selected"
 
     // Tasks list
     pub tasks: Vec<Task>,
@@ -203,10 +210,11 @@ pub struct TuiState {
     // People sort order
     pub sort_order: SortOrder,
 
-    // Delete confirmation (person or source)
+    // Delete confirmation (person, source, event, or relationship)
     pub confirm_name: String,
     pub confirm_person_id: Option<PersonId>,
     pub confirm_source_id: Option<SourceId>,
+    pub confirm_rel_id: Option<RelationshipId>,
 
     // Top places by event count (for Stats tab)
     pub top_places: Vec<(String, usize)>, // (place name, event count)
@@ -223,7 +231,8 @@ pub struct TuiState {
     // Inline person creation
     pub person_create_given: String,
     pub person_create_surname: String,
-    pub person_create_field: u8, // 0 = given, 1 = surname
+    pub person_create_sex: u8,   // 0 = Unknown, 1 = Male, 2 = Female
+    pub person_create_field: u8, // 0 = given, 1 = surname, 2 = sex
 
     // Inline person edit (edit primary name of selected person)
     pub person_edit_given: String,
@@ -250,11 +259,40 @@ pub struct TuiState {
     pub event_create_field: u8,         // 0 = type, 1 = date, 2 = place
     pub event_create_person_id: Option<PersonId>,
 
+    // Inline event edit (from person detail panel)
+    pub event_edit_id: Option<EventId>,
+    pub event_edit_type_idx: usize,
+    pub event_edit_date: String,
+    pub event_edit_place: String,
+    pub event_edit_field: u8,           // 0 = type, 1 = date, 2 = place
+
+    // Delete confirmation for events (separate from person/source confirm)
+    pub confirm_event_id: Option<EventId>,
+
     // Inline relationship creation (from person detail panel)
     pub rel_create_person2_buf: String, // name fragment to match against people list
     pub rel_create_type_idx: usize,     // index into TUI_REL_TYPES
     pub rel_create_field: u8,           // 0 = person2 name, 1 = rel type
     pub rel_create_person1_id: Option<PersonId>,
+
+    // Inline person notes edit
+    pub person_notes_buf: String,
+    pub person_notes_id: Option<PersonId>,
+
+    // Task detail panel
+    pub task_detail_open: bool,
+
+    // Inline task notes edit
+    pub task_notes_buf: String,
+    pub task_notes_id: Option<TaskId>,
+
+    // Inline citation creation (from person detail panel, selected event)
+    pub citation_event_id: Option<EventId>,
+    pub citation_source_buf: String,         // search fragment typed by user
+    pub citation_source_matches: Vec<(SourceId, String)>, // (id, title) filtered
+    pub citation_source_cursor: usize,       // which match is highlighted
+    pub citation_page_buf: String,
+    pub citation_field: u8,                  // 0 = source search, 1 = page
 }
 
 impl TuiState {
@@ -314,6 +352,8 @@ impl TuiState {
             detail_scroll: 0,
             detail_notes: None,
             detail_media_count: 0,
+            detail_event_cursor: 0,
+            detail_rel_cursor: 0,
             tasks,
             task_rows,
             tasks_selected: first_task,
@@ -336,6 +376,7 @@ impl TuiState {
             confirm_name: String::new(),
             confirm_person_id: None,
             confirm_source_id: None,
+            confirm_rel_id: None,
             top_places: load_top_places(app),
             task_create_buf: String::new(),
             task_edit_desc: String::new(),
@@ -344,6 +385,7 @@ impl TuiState {
             task_edit_field: 0,
             person_create_given: String::new(),
             person_create_surname: String::new(),
+            person_create_sex: 0,
             person_create_field: 0,
             person_edit_given: String::new(),
             person_edit_surname: String::new(),
@@ -362,10 +404,27 @@ impl TuiState {
             event_create_place: String::new(),
             event_create_field: 0,
             event_create_person_id: None,
+            event_edit_id: None,
+            event_edit_type_idx: 0,
+            event_edit_date: String::new(),
+            event_edit_place: String::new(),
+            event_edit_field: 0,
+            confirm_event_id: None,
             rel_create_person2_buf: String::new(),
             rel_create_type_idx: 0,
             rel_create_field: 0,
             rel_create_person1_id: None,
+            person_notes_buf: String::new(),
+            person_notes_id: None,
+            task_detail_open: false,
+            task_notes_buf: String::new(),
+            task_notes_id: None,
+            citation_event_id: None,
+            citation_source_buf: String::new(),
+            citation_source_matches: vec![],
+            citation_source_cursor: 0,
+            citation_page_buf: String::new(),
+            citation_field: 0,
         })
     }
 

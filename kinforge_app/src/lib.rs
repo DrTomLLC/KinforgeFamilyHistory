@@ -1,8 +1,10 @@
 use chrono::Local;
 use kinforge_config::Config;
 use kinforge_core::{models::*, validation, KinforgeError, KinforgeResult};
+use kinforge_plugin_api::{PluginEvent, PluginRegistry};
 use kinforge_storage::{repository::DatabaseStats, Database, FtsResult};
 use std::path::Path;
+use std::sync::Mutex;
 
 /// A single issue found during an integrity check.
 #[derive(Debug, Clone)]
@@ -38,6 +40,7 @@ pub struct BackupInfo {
 pub struct Application {
     db: Database,
     pub config: Config,
+    plugins: Mutex<PluginRegistry>,
 }
 
 impl Application {
@@ -47,6 +50,26 @@ impl Application {
     /// report and import/export functions that operate at the storage layer.
     pub fn database(&self) -> &Database {
         &self.db
+    }
+
+    /// Register a plugin with the application.  Its `on_load` hook is called
+    /// immediately.  Registered plugins receive `PluginEvent` notifications
+    /// after every significant write operation.
+    pub fn register_plugin(
+        &self,
+        plugin: Box<dyn kinforge_plugin_api::KinforgePlugin>,
+    ) -> KinforgeResult<()> {
+        self.plugins.lock().unwrap().register(plugin)
+    }
+
+    /// Number of currently registered plugins.
+    pub fn plugin_count(&self) -> usize {
+        self.plugins.lock().unwrap().plugin_count()
+    }
+
+    /// Internal: fire an event to all registered plugins.
+    fn fire(&self, event: PluginEvent) {
+        self.plugins.lock().unwrap().notify(&event);
     }
 }
 
@@ -67,7 +90,7 @@ impl Application {
         }
 
         let db = Database::open(&config.database_path)?;
-        Ok(Self { db, config })
+        Ok(Self { db, config, plugins: Mutex::new(PluginRegistry::new()) })
     }
 
     pub fn open_in_memory() -> KinforgeResult<Self> {
@@ -75,6 +98,7 @@ impl Application {
         Ok(Self {
             db,
             config: Config::default(),
+            plugins: Mutex::new(PluginRegistry::new()),
         })
     }
 
@@ -106,6 +130,7 @@ impl Application {
         person.notes = notes.map(|s| s.to_string());
         validation::validate_person(&person)?;
         self.db.insert_person(&person)?;
+        self.fire(PluginEvent::PersonAdded { name: person.display_name() });
         Ok(person)
     }
 
@@ -593,6 +618,13 @@ impl Application {
         event.notes = notes.map(|s| s.to_string());
         validation::validate_event(&event)?;
         self.db.insert_event(&event)?;
+        let person_name = self.db.get_person(&event.person_id)
+            .map(|p| p.display_name())
+            .unwrap_or_default();
+        self.fire(PluginEvent::EventAdded {
+            event_type: event.event_type.to_string(),
+            person_name,
+        });
         Ok(event)
     }
 
@@ -679,6 +711,7 @@ impl Application {
         rel.notes = notes.map(|s| s.to_string());
         validation::validate_relationship(&rel)?;
         self.db.insert_relationship(&rel)?;
+        self.fire(PluginEvent::RelationshipAdded { rel_type: rel.rel_type.to_string() });
         Ok(rel)
     }
 
@@ -1081,6 +1114,7 @@ impl Application {
         t.priority = priority;
         t.notes = notes.map(|s| s.to_string());
         self.db.insert_task(&t)?;
+        self.fire(PluginEvent::TaskAdded { description: t.description.clone() });
         Ok(t)
     }
 

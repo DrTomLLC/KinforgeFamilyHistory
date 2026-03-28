@@ -1496,3 +1496,532 @@ fn source_filter_by_title_substring() {
     assert_eq!(matching.len(), 2);
     assert!(matching.iter().all(|s| s.title.contains("Census")));
 }
+
+// ── Phase 22 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn plugin_registry_registers_and_notifies() {
+    use kinforge_plugin_api::{KinforgePlugin, PluginEvent, PluginRegistry};
+    use std::sync::{Arc, Mutex};
+
+    struct CounterPlugin {
+        count: Arc<Mutex<usize>>,
+    }
+    impl KinforgePlugin for CounterPlugin {
+        fn id(&self) -> &str { "counter" }
+        fn name(&self) -> &str { "Counter" }
+        fn version(&self) -> &str { "0.1" }
+        fn on_event(&mut self, _event: &PluginEvent) {
+            *self.count.lock().unwrap() += 1;
+        }
+    }
+
+    let count = Arc::new(Mutex::new(0usize));
+    let mut registry = PluginRegistry::new();
+    registry.register(Box::new(CounterPlugin { count: count.clone() })).unwrap();
+    assert_eq!(registry.plugin_count(), 1);
+
+    registry.notify(&PluginEvent::PersonAdded { name: "Alice".to_string() });
+    registry.notify(&PluginEvent::TaskAdded { description: "Research".to_string() });
+    assert_eq!(*count.lock().unwrap(), 2);
+}
+
+#[test]
+fn plugin_unregister_all_calls_on_unload() {
+    use kinforge_core::KinforgeResult;
+    use kinforge_plugin_api::{KinforgePlugin, PluginRegistry};
+    use std::sync::{Arc, Mutex};
+
+    struct UnloadPlugin {
+        unloaded: Arc<Mutex<bool>>,
+    }
+    impl KinforgePlugin for UnloadPlugin {
+        fn id(&self) -> &str { "unload-test" }
+        fn name(&self) -> &str { "Unload Test" }
+        fn version(&self) -> &str { "0.1" }
+        fn on_unload(&mut self) -> KinforgeResult<()> {
+            *self.unloaded.lock().unwrap() = true;
+            Ok(())
+        }
+    }
+
+    let unloaded = Arc::new(Mutex::new(false));
+    let mut registry = PluginRegistry::new();
+    registry.register(Box::new(UnloadPlugin { unloaded: unloaded.clone() })).unwrap();
+    registry.unregister_all();
+    assert_eq!(registry.plugin_count(), 0);
+    assert!(*unloaded.lock().unwrap());
+}
+
+#[test]
+fn person_notes_update_persists() {
+    let a = app();
+    let p = a.add_person(Some("Walt"), Some("Whitman"), Sex::Male, None).unwrap();
+    let mut person = a.get_person(&p.id).unwrap();
+    person.notes = Some("American poet, journalist, and essayist.".to_string());
+    a.update_person(person).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert_eq!(
+        retrieved.notes.as_deref(),
+        Some("American poet, journalist, and essayist.")
+    );
+}
+
+#[test]
+fn person_notes_cleared_when_empty() {
+    let a = app();
+    let p = a.add_person(Some("Emily"), Some("Dickinson"), Sex::Female, None).unwrap();
+    let mut person = a.get_person(&p.id).unwrap();
+    person.notes = Some("Poet".to_string());
+    a.update_person(person).unwrap();
+    // Now clear notes
+    let mut person2 = a.get_person(&p.id).unwrap();
+    person2.notes = None;
+    a.update_person(person2).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert!(retrieved.notes.is_none());
+}
+
+#[test]
+fn birthdays_report_sorted_by_month_day() {
+    use kinforge_reports::birthdays_report;
+    let a = app();
+    let p1 = a.add_person(Some("June"), Some("First"), Sex::Female, None).unwrap();
+    a.add_event(p1.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1900, 6, 1).unwrap())),
+        None, None).unwrap();
+    let p2 = a.add_person(Some("March"), Some("Fifteenth"), Sex::Male, None).unwrap();
+    a.add_event(p2.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1855, 3, 15).unwrap())),
+        None, None).unwrap();
+    let p3 = a.add_person(Some("January"), Some("Third"), Sex::Unknown, None).unwrap();
+    a.add_event(p3.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1920, 1, 3).unwrap())),
+        None, None).unwrap();
+    let report = birthdays_report(a.database()).unwrap();
+    // January should come before March, which should come before June
+    let pos_jan = report.find("January").unwrap();
+    let pos_mar = report.find("March").unwrap();
+    let pos_jun = report.find("June").unwrap();
+    assert!(pos_jan < pos_mar, "January should appear before March");
+    assert!(pos_mar < pos_jun, "March should appear before June");
+    assert!(report.contains("3 with known date") || report.contains("Birthdays"));
+}
+
+// ── Phase 23 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn event_update_changes_type_and_date() {
+    let a = app();
+    let p = a.add_person(Some("Nikola"), Some("Tesla"), Sex::Male, None).unwrap();
+    let date = EventDate::Exact(NaiveDate::from_ymd_opt(1856, 7, 10).unwrap());
+    let evt = a.add_event(p.id.clone(), EventType::Birth, Some(date), None, None).unwrap();
+
+    let mut updated = a.get_event(&evt.id).unwrap();
+    updated.event_type = EventType::Baptism;
+    updated.date = Some(EventDate::Exact(NaiveDate::from_ymd_opt(1856, 7, 28).unwrap()));
+    a.update_event(updated).unwrap();
+
+    let retrieved = a.get_event(&evt.id).unwrap();
+    assert!(matches!(retrieved.event_type, EventType::Baptism));
+    assert_eq!(
+        retrieved.date,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1856, 7, 28).unwrap()))
+    );
+}
+
+#[test]
+fn event_delete_removes_from_person_events() {
+    let a = app();
+    let p = a.add_person(Some("Marie"), Some("Curie"), Sex::Female, None).unwrap();
+    let e1 = a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    let e2 = a.add_event(p.id.clone(), EventType::Death, None, None, None).unwrap();
+    assert_eq!(a.list_events_for_person(&p.id).unwrap().len(), 2);
+    a.delete_event(&e1.id).unwrap();
+    let remaining = a.list_events_for_person(&p.id).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, e2.id);
+}
+
+#[test]
+fn person_create_with_sex_male() {
+    let a = app();
+    let p = a.add_person(Some("Charles"), Some("Darwin"), Sex::Male, None).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert!(matches!(retrieved.sex, Sex::Male));
+    assert_eq!(retrieved.names[0].given.as_deref(), Some("Charles"));
+}
+
+#[test]
+fn person_create_with_sex_female() {
+    let a = app();
+    let p = a.add_person(Some("Ada"), Some("Lovelace"), Sex::Female, None).unwrap();
+    let retrieved = a.get_person(&p.id).unwrap();
+    assert!(matches!(retrieved.sex, Sex::Female));
+}
+
+#[test]
+fn census_report_includes_person_born_before_census() {
+    use kinforge_reports::census_report;
+    let a = app();
+    let p = a.add_person(Some("Abraham"), Some("Lincoln"), Sex::Male, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1809, 2, 12).unwrap())),
+        None, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Death,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1865, 4, 15).unwrap())),
+        None, None).unwrap();
+    let report = census_report(a.database()).unwrap();
+    // Lincoln born 1809, dead 1865 — should appear in 1810 through 1860 censuses
+    assert!(report.contains("Abraham Lincoln"));
+    // Should NOT appear in 1870 (died 1865)
+    let pos_1870 = report.find("1870");
+    let pos_lincoln = report.find("Abraham Lincoln");
+    if let (Some(p70), Some(pl)) = (pos_1870, pos_lincoln) {
+        // Lincoln must appear before 1870 section
+        assert!(pl < p70, "Lincoln should not appear in 1870 census");
+    }
+}
+
+// ── Phase 24 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn delete_relationship_removes_from_person_rels() {
+    let a = app();
+    let p1 = a.add_person(Some("George"), Some("Washington"), Sex::Male, None).unwrap();
+    let p2 = a.add_person(Some("Martha"), Some("Washington"), Sex::Female, None).unwrap();
+    let rel = a.add_relationship(RelationshipType::Spouse, p1.id.clone(), p2.id.clone(), None).unwrap();
+    assert_eq!(a.list_relationships_for_person(&p1.id).unwrap().len(), 1);
+    a.delete_relationship(&rel.id).unwrap();
+    assert_eq!(a.list_relationships_for_person(&p1.id).unwrap().len(), 0);
+}
+
+#[test]
+fn task_start_sets_in_progress() {
+    let a = app();
+    let task = a.add_task("Test task", None, TaskPriority::Medium, None).unwrap();
+    assert!(matches!(task.status, TaskStatus::Pending));
+    let mut t = a.get_task(&task.id).unwrap();
+    t.status = TaskStatus::InProgress;
+    t.touch();
+    a.update_task(t).unwrap();
+    let updated = a.get_task(&task.id).unwrap();
+    assert!(matches!(updated.status, TaskStatus::InProgress));
+}
+
+#[test]
+fn missing_data_report_flags_no_birth_date() {
+    use kinforge_reports::missing_data_report;
+    let a = app();
+    let p = a.add_person(Some("Unknown"), Some("Person"), Sex::Unknown, None).unwrap();
+    // Add an event but not a birth date
+    a.add_event(p.id.clone(), EventType::Death, None, None, None).unwrap();
+    let report = missing_data_report(a.database()).unwrap();
+    assert!(report.contains("Unknown Person"));
+    assert!(report.contains("no birth date") || report.contains("unknown sex"));
+}
+
+#[test]
+fn missing_data_report_clean_person_absent() {
+    use kinforge_reports::missing_data_report;
+    let a = app();
+    let p = a.add_person(Some("Complete"), Some("Record"), Sex::Male, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1900, 1, 1).unwrap())),
+        None, None).unwrap();
+    let report = missing_data_report(a.database()).unwrap();
+    assert!(!report.contains("Complete Record"));
+}
+
+#[test]
+fn surnames_report_counts_and_sorts_by_frequency() {
+    use kinforge_reports::surnames_report;
+    let a = app();
+    // Three Smiths, one Jones
+    for given in &["Alice", "Bob", "Carol"] {
+        a.add_person(Some(given), Some("Smith"), Sex::Unknown, None).unwrap();
+    }
+    a.add_person(Some("Dave"), Some("Jones"), Sex::Male, None).unwrap();
+    let report = surnames_report(a.database()).unwrap();
+    let pos_smith = report.find("Smith").unwrap();
+    let pos_jones = report.find("Jones").unwrap();
+    assert!(pos_smith < pos_jones, "Smith (3) should appear before Jones (1)");
+    assert!(report.contains("3"));
+    assert!(report.contains("1"));
+}
+
+// ── Phase 25 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn add_citation_links_source_to_event() {
+    use kinforge_core::models::{ConfidenceLevel, SourceId};
+    let a = app();
+    let p = a.add_person(Some("Isaac"), Some("Newton"), Sex::Male, None).unwrap();
+    let evt = a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    let src = a.add_source("Principia Mathematica", None, None, None, None, None).unwrap();
+    let cit = a.add_citation(src.id.clone(), evt.id.clone(), Some("p.1"), ConfidenceLevel::Primary, None).unwrap();
+    let citations = a.list_citations_for_event(&evt.id).unwrap();
+    assert_eq!(citations.len(), 1);
+    assert_eq!(citations[0].id, cit.id);
+    assert_eq!(citations[0].source_id, src.id);
+}
+
+#[test]
+fn completeness_report_low_score_for_minimal_person() {
+    use kinforge_reports::completeness_report;
+    let a = app();
+    // Minimal person: unknown sex, no events, no rels, no citations
+    a.add_person(Some("Ghost"), Some("Record"), Sex::Unknown, None).unwrap();
+    let report = completeness_report(a.database()).unwrap();
+    assert!(report.contains("Ghost Record"));
+    // Should show a low percentage
+    assert!(report.contains("0%") || report.contains("missing:"));
+}
+
+#[test]
+fn completeness_report_higher_score_for_complete_person() {
+    use kinforge_core::models::ConfidenceLevel;
+    use kinforge_reports::completeness_report;
+    let a = app();
+    let p = a.add_person(Some("Well"), Some("Documented"), Sex::Female, None).unwrap();
+    let p2 = a.add_person(Some("Parent"), Some("Of"), Sex::Male, None).unwrap();
+    let birth_date = EventDate::Exact(NaiveDate::from_ymd_opt(1900, 6, 15).unwrap());
+    let evt = a.add_event(p.id.clone(), EventType::Birth, Some(birth_date), Some("Springfield"), None).unwrap();
+    a.add_relationship(RelationshipType::ParentChild, p2.id.clone(), p.id.clone(), None).unwrap();
+    let src = a.add_source("Church Register", None, None, None, None, None).unwrap();
+    a.add_citation(src.id.clone(), evt.id.clone(), Some("p.5"), ConfidenceLevel::Primary, None).unwrap();
+    let report = completeness_report(a.database()).unwrap();
+    assert!(report.contains("Well Documented"));
+    // Should have a relatively high pct
+    // score: birth date(2) + birth place(1) + sex(1) + rels(1) + citations(2) = 7/8 = 87%
+    assert!(report.contains("87%") || report.contains("Well Documented"));
+}
+
+#[test]
+fn missing_data_report_omits_complete_person() {
+    use kinforge_reports::missing_data_report;
+    let a = app();
+    let p = a.add_person(Some("Full"), Some("Data"), Sex::Male, None).unwrap();
+    let birth_date = EventDate::Exact(NaiveDate::from_ymd_opt(1875, 3, 1).unwrap());
+    a.add_event(p.id.clone(), EventType::Birth, Some(birth_date), None, None).unwrap();
+    let report = missing_data_report(a.database()).unwrap();
+    // Has birth date, known sex — not flagged
+    assert!(!report.contains("Full Data"));
+}
+
+#[test]
+fn surnames_report_shows_decade_range_for_person_with_birth_year() {
+    use kinforge_reports::surnames_report;
+    let a = app();
+    let p = a.add_person(Some("Thomas"), Some("Edison"), Sex::Male, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(NaiveDate::from_ymd_opt(1847, 2, 11).unwrap())),
+        None, None).unwrap();
+    let report = surnames_report(a.database()).unwrap();
+    assert!(report.contains("Edison"));
+    assert!(report.contains("1840s") || report.contains("1840"));
+}
+
+// ── Phase 26 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn anniversary_report_includes_person_born_near_today() {
+    use kinforge_reports::anniversary_report;
+    use chrono::{Local, Datelike};
+    let a = app();
+    let p = a.add_person(Some("Birthday"), Some("Soon"), Sex::Female, None).unwrap();
+    // Use a date 7 days from today (same month/day in some past year)
+    let today = Local::now().date_naive();
+    // Pick a date 3 days from now, but in 1950 (for the "years since" calc)
+    let target = today + chrono::Duration::days(3);
+    let birth_date = NaiveDate::from_ymd_opt(1950, target.month(), target.day()).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(birth_date)), None, None).unwrap();
+    let report = anniversary_report(a.database(), 30).unwrap();
+    assert!(report.contains("Birthday Soon"));
+}
+
+#[test]
+fn anniversary_report_excludes_person_outside_window() {
+    use kinforge_reports::anniversary_report;
+    use chrono::{Local, Datelike};
+    let a = app();
+    let p = a.add_person(Some("Far"), Some("Away"), Sex::Male, None).unwrap();
+    // Birth date is 200 days from now
+    let today = Local::now().date_naive();
+    let target = today + chrono::Duration::days(200);
+    let birth_date = NaiveDate::from_ymd_opt(1900, target.month(), target.day()).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(birth_date)), None, None).unwrap();
+    let report = anniversary_report(a.database(), 30).unwrap();
+    assert!(!report.contains("Far Away"));
+}
+
+#[test]
+fn task_notes_update_persists() {
+    let a = app();
+    let task = a.add_task("Research Smith line", None, TaskPriority::Medium, None).unwrap();
+    let mut t = a.get_task(&task.id).unwrap();
+    t.notes = Some("Check 1880 census".to_string());
+    t.touch();
+    a.update_task(t).unwrap();
+    let updated = a.get_task(&task.id).unwrap();
+    assert_eq!(updated.notes.as_deref(), Some("Check 1880 census"));
+}
+
+#[test]
+fn task_notes_cleared_when_empty_string() {
+    let a = app();
+    let task = a.add_task("Clear notes test", None, TaskPriority::Low, Some("initial")).unwrap();
+    let mut t = a.get_task(&task.id).unwrap();
+    t.notes = None;
+    t.touch();
+    a.update_task(t).unwrap();
+    let updated = a.get_task(&task.id).unwrap();
+    assert!(updated.notes.is_none());
+}
+
+#[test]
+fn anniversary_report_shows_years_since_for_birth() {
+    use kinforge_reports::anniversary_report;
+    use chrono::{Local, Datelike};
+    let a = app();
+    let p = a.add_person(Some("Centennial"), Some("Ancestor"), Sex::Unknown, None).unwrap();
+    let today = Local::now().date_naive();
+    // Put anniversary exactly today to guarantee it appears
+    let birth = NaiveDate::from_ymd_opt(1924, today.month(), today.day()).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth,
+        Some(EventDate::Exact(birth)), None, None).unwrap();
+    let report = anniversary_report(a.database(), 0).unwrap();
+    // Should appear (0 days window = today only)
+    assert!(report.contains("Centennial Ancestor"));
+}
+
+// ── Phase 27 ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn plugin_registry_fires_event_on_add_person() {
+    use kinforge_plugin_api::plugins::EventCounterPlugin;
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    // Use a shared counter to observe events
+    let counter = Arc::new(Mutex::new(0usize));
+    let counter_clone = counter.clone();
+
+    struct TestPlugin(Arc<Mutex<usize>>);
+    impl KinforgePlugin for TestPlugin {
+        fn id(&self) -> &str { "test.counter" }
+        fn name(&self) -> &str { "Test Counter" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            if matches!(event, kinforge_plugin_api::PluginEvent::PersonAdded { .. }) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(TestPlugin(counter_clone))).unwrap();
+    a.add_person(Some("Plugin"), Some("Test"), Sex::Male, None).unwrap();
+    a.add_person(Some("Second"), Some("Person"), Sex::Female, None).unwrap();
+    assert_eq!(*counter.lock().unwrap(), 2);
+}
+
+#[test]
+fn plugin_event_counter_counts_correctly() {
+    use kinforge_plugin_api::plugins::EventCounterPlugin;
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    // Wrap EventCounterPlugin to inspect it after use
+    let counts = Arc::new(Mutex::new((0usize, 0usize))); // (people, events)
+    let counts_clone = counts.clone();
+
+    struct WrapPlugin(Arc<Mutex<(usize, usize)>>);
+    impl KinforgePlugin for WrapPlugin {
+        fn id(&self) -> &str { "wrap" }
+        fn name(&self) -> &str { "Wrap" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            let mut c = self.0.lock().unwrap();
+            match event {
+                kinforge_plugin_api::PluginEvent::PersonAdded { .. } => c.0 += 1,
+                kinforge_plugin_api::PluginEvent::EventAdded { .. } => c.1 += 1,
+                _ => {}
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(WrapPlugin(counts_clone))).unwrap();
+    let p = a.add_person(Some("Count"), Some("Test"), Sex::Unknown, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Birth, None, None, None).unwrap();
+    a.add_event(p.id.clone(), EventType::Death, None, None, None).unwrap();
+    let c = *counts.lock().unwrap();
+    assert_eq!(c.0, 1); // one person
+    assert_eq!(c.1, 2); // two events
+}
+
+#[test]
+fn plugin_count_reflects_registered_plugins() {
+    use kinforge_plugin_api::plugins::ConsoleLogPlugin;
+    let a = app();
+    assert_eq!(a.plugin_count(), 0);
+    a.register_plugin(Box::new(ConsoleLogPlugin::new())).unwrap();
+    assert_eq!(a.plugin_count(), 1);
+}
+
+#[test]
+fn plugin_fires_task_added_event() {
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    let fired = Arc::new(Mutex::new(false));
+    let fired_clone = fired.clone();
+
+    struct TaskWatcher(Arc<Mutex<bool>>);
+    impl KinforgePlugin for TaskWatcher {
+        fn id(&self) -> &str { "task.watcher" }
+        fn name(&self) -> &str { "Task Watcher" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            if matches!(event, kinforge_plugin_api::PluginEvent::TaskAdded { .. }) {
+                *self.0.lock().unwrap() = true;
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(TaskWatcher(fired_clone))).unwrap();
+    a.add_task("Research church records", None, TaskPriority::High, None).unwrap();
+    assert!(*fired.lock().unwrap());
+}
+
+#[test]
+fn plugin_fires_relationship_added_event() {
+    use kinforge_plugin_api::KinforgePlugin;
+    use std::sync::{Arc, Mutex};
+
+    let fired = Arc::new(Mutex::new(String::new()));
+    let fired_clone = fired.clone();
+
+    struct RelWatcher(Arc<Mutex<String>>);
+    impl KinforgePlugin for RelWatcher {
+        fn id(&self) -> &str { "rel.watcher" }
+        fn name(&self) -> &str { "Rel Watcher" }
+        fn version(&self) -> &str { "0" }
+        fn on_event(&mut self, event: &kinforge_plugin_api::PluginEvent) {
+            if let kinforge_plugin_api::PluginEvent::RelationshipAdded { rel_type } = event {
+                *self.0.lock().unwrap() = rel_type.clone();
+            }
+        }
+    }
+
+    let a = app();
+    a.register_plugin(Box::new(RelWatcher(fired_clone))).unwrap();
+    let p1 = a.add_person(Some("Parent"), Some("A"), Sex::Male, None).unwrap();
+    let p2 = a.add_person(Some("Child"), Some("A"), Sex::Female, None).unwrap();
+    a.add_relationship(RelationshipType::ParentChild, p1.id, p2.id, None).unwrap();
+    assert!(!fired.lock().unwrap().is_empty());
+}

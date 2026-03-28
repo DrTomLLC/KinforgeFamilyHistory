@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
-> **Last updated:** 2026-03-27
-> **Build status:** 113 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.7.0
+> **Last updated:** 2026-03-28
+> **Build status:** 122 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.14.0
 
 ---
 
@@ -97,10 +97,18 @@ Key design principles:
 | `kinforge export markdown` — Markdown family register | ✅ Complete | — |
 | `kinforge report places` — places sorted by event count | ✅ Complete | — |
 | `individual_report` shows linked Research Tasks | ✅ Complete | tested |
-| Plugin API skeleton | ✅ Skeleton present | — |
+| Plugin API with event hooks (`PluginEvent`, `on_event`, `notify`, `unregister_all`) | ✅ Complete | 2 tests |
+| TUI: cite event popup (`C` key, source search + page, adds citation to selected event) | ✅ Complete | tested |
+| `kinforge report completeness` — per-person completeness score with colour bar | ✅ Complete | 2 tests |
+| TUI: `?` help popup — context-sensitive keybinding reference for all tabs | ✅ Complete | — |
+| TUI: `N` in Tasks tab — edit task notes via popup | ✅ Complete | 2 tests |
+| `kinforge report anniversary [--days N]` — upcoming birth/marriage anniversaries | ✅ Complete | 3 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
+| Plugin API (built-in plugins, `ConsoleLogPlugin`, `EventCounterPlugin`) | ✅ Complete | 2 tests |
+| Desktop GUI (`kinforge-desktop`, egui/eframe) | ✅ Complete | — |
+| Cloud/file sync (`kinforge sync push/pull/status`) | ✅ Complete | 5 tests |
 
-**Total: 113 tests passing, 0 failures, 0 warnings**
+**Total: 122 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -117,7 +125,8 @@ For one person to use Kinforge productively right now:
 - [x] Attach media (photos, documents) to people, events, or sources
 - [x] Run reports on individuals, ancestors (with Ahnentafel numbers), descendants, narrative biography
 - [x] Track research tasks with priorities, statuses, and person links
-- [x] Browse your data interactively with `kinforge tui`
+- [x] Browse your data interactively with `kinforge tui` (or `kinforge-desktop` for the native GUI)
+- [x] Sync data between devices via a shared directory (`kinforge sync push/pull/status`)
 - [x] Search your database by name, notes, or full-text across all entities
 - [x] Find the relationship path between any two people
 - [x] Export your data to GEDCOM (importable into Ancestry, FamilySearch, etc.)
@@ -244,6 +253,11 @@ kinforge import gedcom existing_family.ged
 
 # Run integrity check
 kinforge check
+
+# Sync to a shared directory (push local data, pull remote changes)
+kinforge sync push ~/Dropbox/kinforge-sync --device-id "my-laptop"
+kinforge sync status ~/Dropbox/kinforge-sync
+kinforge sync pull ~/Dropbox/kinforge-sync
 ```
 
 ---
@@ -431,6 +445,8 @@ kinforge report places
 kinforge report summary
 kinforge report path --from <ID> --to <ID>
 kinforge report global-timeline [--limit <N>]
+kinforge report birthdays
+kinforge report census
 ```
 
 `--detailed` adds a birth-decade histogram and top-10 surname frequency table.
@@ -438,6 +454,10 @@ kinforge report global-timeline [--limit <N>]
 `report path` prints the shortest relationship path between two people (BFS) with the number of degrees of separation.
 
 `report global-timeline` lists all events across all people in chronological order. Defaults to 200 events; use `--limit` to adjust.
+
+`report birthdays` lists all people with a known birth month and day, sorted by month then day — useful as an annual birthday reference card.
+
+`report census` shows all people likely alive at each US decennial census year (1790–1940), based on known birth and death dates.
 
 ### `search`
 
@@ -497,6 +517,40 @@ kinforge backup create
 
 Backups are stored in a `backups/` subdirectory next to the database file, named `<stem>_<timestamp>.db`.
 
+### `sync`
+
+```
+kinforge sync push <DIR> [--device-id <ID>]
+kinforge sync pull <DIR>
+kinforge sync status <DIR>
+```
+
+Sync data between machines (or between locations on the same machine) via a shared directory — a USB drive, Dropbox folder, network share, or any folder you can write to from multiple devices.
+
+**How it works (additive-only merge):**
+
+- `push` exports a full JSON snapshot of your database to `<DIR>/kinforge_export.json` and writes metadata to `<DIR>/kinforge_manifest.json`.
+- `pull` reads the snapshot from the directory and inserts any records whose UUID does not already exist locally. **Existing records are never overwritten or deleted.**
+- `status` compares your local database counts against the manifest without modifying anything.
+
+**Workflow example (two machines sharing a Dropbox folder):**
+
+```bash
+# Machine A — push your data
+kinforge sync push ~/Dropbox/kinforge-sync --device-id "macbook-alice"
+
+# Machine B — pull Alice's changes
+kinforge sync pull ~/Dropbox/kinforge-sync
+
+# Machine B — check what has changed before pulling
+kinforge sync status ~/Dropbox/kinforge-sync
+```
+
+**Notes:**
+- The sync is safe to run repeatedly — already-present records are counted as `duplicates_skipped`.
+- `--device-id` is a stable label for the machine that pushed; it appears in `status` output so you know which device last wrote to the directory. Defaults to `"local"`.
+- For bidirectional sync, both machines should push and pull. Because the merge is additive, changes from both sides accumulate safely.
+
 ### `check`
 
 ```
@@ -548,6 +602,10 @@ Opens an interactive terminal UI with four tabs:
 | `f` | Tasks | Cycle status filter (All → Pending → In Progress → Done → All) |
 | `a` | People (detail open) | Open add-event popup (type ←/→, date, place) |
 | `r` | People (detail open) | Open add-relationship popup (type ←/→, person name search) |
+| `N` | People | Open notes editor popup (prefilled with existing notes) |
+| `E` | People (detail open) | Edit the currently selected event (type ←/→, date, place) |
+| `x` | People (detail open) | Delete the currently selected event (confirm popup) |
+| `Enter` | Tasks | Open task detail panel (status, priority, notes, created date) |
 | `x` | People | Open confirm-delete popup for selected person |
 | `e` | Sources | Edit selected source (title, author, year; prefilled popup) |
 | `/` | Sources | Enter search/filter mode for source titles |
@@ -594,9 +652,9 @@ kinforge_reports       — text report generators (individual, ancestors, narrat
 kinforge_viz           — ASCII tree renderers (family tree, ancestor tree)
 kinforge_app           — Application facade: CRUD, search, tasks, path-finding, integrity
 kinforge_cli           — clap CLI (binary) + ratatui TUI
-kinforge_plugin_api    — plugin trait skeleton (future extensibility)
-kinforge_sync          — sync/replication skeleton (not yet implemented)
-kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
+kinforge_plugin_api    — plugin trait + built-in plugins (ConsoleLogPlugin, EventCounterPlugin)
+kinforge_sync          — file-based sync (push/pull/status with additive merge, manifest)
+kinforge_ui_desktop    — desktop GUI (egui/eframe: people list, detail panels, stats sidebar)
 ```
 
 ### Schema versions
@@ -614,10 +672,8 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 
 | Feature | Notes |
 |---------|-------|
-| Desktop GUI | `kinforge_ui_desktop` stub only; no UI framework chosen |
-| Cloud/peer sync | `kinforge_sync` stub only |
-| Plugin loading | Trait defined; no loader or host |
-| In-place name editing | `person update-name` / `person delete-name` commands available |
+| Dynamic plugin loading from .so/.dll | Plugin trait and built-in plugins complete; runtime dylib loading not yet implemented |
+| Network/cloud sync backend | File-system sync complete; network (SSH/S3/WebDAV) backends are extension points via `SyncBackend` trait |
 
 ---
 
@@ -678,7 +734,53 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] `kinforge report path --from --to` — print shortest relationship path with degrees of separation
 - [x] `kinforge report global-timeline [--limit N]` — chronological timeline of all events across all people
 
-**Future:**
-- [ ] Desktop GUI (`kinforge_ui_desktop`)
-- [ ] Optional sync between devices (`kinforge_sync`)
-- [ ] Plugin loading at runtime (`kinforge_plugin_api`)
+**v1.13.0 (Phase 27):**
+- [x] Plugin system wired into `Application`: `register_plugin()`, `plugin_count()`, live event dispatch in `add_person`, `add_event`, `add_relationship`, `add_task`
+- [x] Two built-in example plugins: `ConsoleLogPlugin` (logs all events to stderr) and `EventCounterPlugin` (tallies by type, reports on unload)
+- [x] `kinforge plugin list` — CLI command listing built-in plugins with IDs and descriptions
+- [x] Desktop GUI (`kinforge-desktop` binary) — functional egui/eframe app: people list with search, person detail (events + relationships collapsible), stats sidebar, menu bar, sex colour dots, status bar
+- [x] Integration tests: 117 total (112 → 117)
+
+**v1.12.0 (Phase 26):**
+- [x] TUI: `?` key — context-sensitive keyboard shortcut help popup (different content per tab and panel state)
+- [x] TUI: `N` in Tasks tab — edit task notes via single-line popup (works from list and task detail panel)
+- [x] `kinforge report anniversary [--days N]` — upcoming birthdays and marriage anniversaries within N days (default 365), sorted by days-until, with years-since label
+- [x] Integration tests: 112 total (107 → 112)
+
+**v1.11.0 (Phase 25):**
+- [x] TUI: `C` in person detail panel — cite selected event (source search popup with ↑/↓ cycling, optional page field)
+- [x] TUI: status bar updated — People detail shows J/K/X/C keys; Tasks shows `s: start`
+- [x] `kinforge report completeness` — per-person scoring (birth date, birth place, sex, death date, relationships, citations); sorted lowest first with colour bar
+- [x] Integration tests: 107 total (102 → 107)
+
+**v1.10.0 (Phase 24):**
+- [x] TUI: `J`/`K` in person detail panel — move relationship cursor; selected relationship highlighted with `»`
+- [x] TUI: `X` in person detail — delete selected relationship (confirm popup)
+- [x] TUI: `s` in Tasks tab — start a Pending task (sets status to InProgress)
+- [x] `kinforge report missing-data` — lists people with no birth date, unknown sex, or no events
+- [x] `kinforge report surnames` — surname frequency table with birth-decade ranges
+- [x] Integration tests: 102 total (97 → 102)
+
+**v1.9.0 (Phase 23):**
+- [x] TUI: `↑`/`↓` in person detail panel selects individual events; selected event highlighted
+- [x] TUI: `E` in person detail — edit selected event (type, date, place; prefilled popup)
+- [x] TUI: `x` in person detail — delete selected event (confirm popup)
+- [x] TUI: person create popup now includes Sex field (3rd field, ←/→ cycles Unknown/Male/Female)
+- [x] `kinforge report census` — US census snapshots 1790–1940 showing who was likely alive
+
+**v1.8.0 (Phase 22):**
+- [x] Plugin API: `PluginEvent` enum with lifecycle hooks (`on_event`); `PluginRegistry::notify()` dispatches to all plugins; `unregister_all()` calls `on_unload` on each
+- [x] TUI: `N` in People tab — edit person notes via prefilled single-line popup (works from list and detail panel)
+- [x] TUI: `Enter` in Tasks tab — toggle task detail panel (status, priority, full description, notes, created date)
+- [x] `kinforge report birthdays` — annual birthday reference sorted by month/day
+
+**v1.14.0 (Phase 28 — final planned phase):**
+- [x] `kinforge sync push <dir> [--device-id ID]` — export full DB to JSON + write manifest
+- [x] `kinforge sync pull <dir>` — additive import (existing UUIDs skipped, never overwritten)
+- [x] `kinforge sync status <dir>` — compare local counts vs remote manifest; hints for push/pull
+- [x] `SyncManifest` JSON (device_id, pushed_at, export_version, per-entity counts)
+- [x] `FileSyncBackend` implementing `SyncBackend` trait (extension point for future network backends)
+- [x] 5 integration tests for sync (push creates files, manifest round-trip, pull imports, additive no-dups, status remote counts)
+- [x] Integration tests: 122 total (117 → 122)
+
+**All planned phases complete. Kinforge Family History is feature-complete.**

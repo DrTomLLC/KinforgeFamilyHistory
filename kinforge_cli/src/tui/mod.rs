@@ -61,6 +61,7 @@ fn run(
                         state.detail_person_id = Some(pid);
                         state.detail_open = true;
                         state.detail_scroll = 0;
+                        state.detail_event_cursor = 0;
                     }
 
                     events::Action::OpenSourceDetail(sid) => {
@@ -72,6 +73,7 @@ fn run(
 
                     events::Action::CompleteTask(tid) => {
                         let _ = app.complete_task(&tid);
+                        state.task_detail_open = false;
                         state.reload_tasks(app);
                     }
 
@@ -98,10 +100,10 @@ fn run(
                         state.reload_tasks(app);
                     }
 
-                    events::Action::CreatePerson(given, surname) => {
+                    events::Action::CreatePerson(given, surname, sex) => {
                         let g = if given.is_empty() { None } else { Some(given.as_str()) };
                         let s = if surname.is_empty() { None } else { Some(surname.as_str()) };
-                        let _ = app.add_person(g, s, kinforge_core::models::Sex::Unknown, None);
+                        let _ = app.add_person(g, s, sex, None);
                         state.reload_people(app);
                     }
 
@@ -173,6 +175,60 @@ fn run(
                         state.reload_top_places(app);
                     }
 
+                    events::Action::EditEvent(eid, type_name, date_str, place_str) => {
+                        if let Ok(mut event) = app.get_event(&eid) {
+                            event.event_type = type_name.parse().unwrap_or(
+                                kinforge_core::models::EventType::Other(type_name)
+                            );
+                            event.date = if date_str.is_empty() {
+                                None
+                            } else {
+                                chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                    .ok()
+                                    .map(EventDate::Exact)
+                            };
+                            if !place_str.is_empty() {
+                                if let Ok(pid) = app.find_or_create_place(&place_str) {
+                                    event.place_id = Some(pid);
+                                }
+                            } else {
+                                event.place_id = None;
+                            }
+                            let _ = app.update_event(event);
+                            // Refresh detail panel events
+                            if let Some(ref pid) = state.detail_person_id.clone() {
+                                let evts = app.list_events_for_person(pid).unwrap_or_default();
+                                state.detail_event_places = evts.iter()
+                                    .map(|e| e.place_id.as_ref()
+                                        .and_then(|plid| app.get_place(plid).ok())
+                                        .map(|pl| pl.name))
+                                    .collect();
+                                state.detail_events = evts;
+                                state.detail_event_cursor = state.detail_event_cursor
+                                    .min(state.detail_events.len().saturating_sub(1));
+                            }
+                            state.reload_people(app);
+                        }
+                    }
+
+                    events::Action::DeleteEvent(eid) => {
+                        let _ = app.delete_event(&eid);
+                        // Refresh detail panel events
+                        if let Some(ref pid) = state.detail_person_id.clone() {
+                            let evts = app.list_events_for_person(pid).unwrap_or_default();
+                            state.detail_event_places = evts.iter()
+                                .map(|e| e.place_id.as_ref()
+                                    .and_then(|plid| app.get_place(plid).ok())
+                                    .map(|pl| pl.name))
+                                .collect();
+                            state.detail_events = evts;
+                            state.detail_event_cursor = state.detail_event_cursor
+                                .min(state.detail_events.len().saturating_sub(1));
+                        }
+                        state.reload_people(app);
+                        state.reload_top_places(app);
+                    }
+
                     events::Action::EditTask(tid, desc, priority) => {
                         if let Ok(mut task) = app.get_task(&tid) {
                             task.description = desc;
@@ -196,12 +252,73 @@ fn run(
                         }
                     }
 
+                    events::Action::UpdatePersonNotes(pid, notes) => {
+                        if let Ok(mut person) = app.get_person(&pid) {
+                            person.notes = if notes.is_empty() { None } else { Some(notes.clone()) };
+                            let _ = app.update_person(person);
+                            // Refresh detail panel notes if this person is open
+                            if state.detail_person_id.as_ref() == Some(&pid) {
+                                state.detail_notes = if notes.is_empty() { None } else { Some(notes) };
+                            }
+                        }
+                    }
+
                     events::Action::CreateRelationship(pid1, rel_type_token, pid2) => {
                         if let Ok(rt) = rel_type_token.parse::<RelationshipType>() {
                             let _ = app.add_relationship(rt, pid1.clone(), pid2, None);
                             state.detail_rel_rows =
                                 build_person_rel_rows(app, &pid1, &state.people);
                         }
+                    }
+
+                    events::Action::DeleteRelationship(rid) => {
+                        let _ = app.delete_relationship(&rid);
+                        if let Some(ref pid) = state.detail_person_id.clone() {
+                            state.detail_rel_rows =
+                                build_person_rel_rows(app, pid, &state.people);
+                            state.detail_rel_cursor = state.detail_rel_cursor
+                                .min(state.detail_rel_rows.len().saturating_sub(1));
+                        }
+                    }
+
+                    events::Action::StartTask(tid) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.status = kinforge_core::models::TaskStatus::InProgress;
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
+                    }
+
+                    events::Action::UpdateTaskNotes(tid, notes) => {
+                        if let Ok(mut task) = app.get_task(&tid) {
+                            task.notes = if notes.is_empty() { None } else { Some(notes) };
+                            task.touch();
+                            let _ = app.update_task(task);
+                            state.reload_tasks(app);
+                        }
+                    }
+
+                    events::Action::AddCitation(eid, sid, page) => {
+                        let page_opt = if page.is_empty() { None } else { Some(page.as_str()) };
+                        let _ = app.add_citation(
+                            sid.clone(),
+                            eid,
+                            page_opt,
+                            kinforge_core::models::ConfidenceLevel::Secondary,
+                            None,
+                        );
+                        // If the source whose citation was just added is currently open in the
+                        // source detail panel, refresh citation list
+                        if let Some(src_row) = state.sources.iter().find(|s| s.id == sid) {
+                            let src_id = src_row.id.clone();
+                            if state.source_detail_open {
+                                state.source_detail_citations =
+                                    build_source_citation_rows(app, &src_id);
+                            }
+                        }
+                        // Reload sources to update citation counts
+                        state.reload_sources(app);
                     }
 
                     events::Action::None => {}
@@ -221,7 +338,7 @@ fn build_person_rel_rows(
     app: &Application,
     focused_pid: &kinforge_core::models::PersonId,
     people_cache: &[state::PersonRow],
-) -> Vec<(String, String)> {
+) -> Vec<(String, String, kinforge_core::models::RelationshipId)> {
     let rels = app
         .list_relationships_for_person(focused_pid)
         .unwrap_or_default();
@@ -229,11 +346,7 @@ fn build_person_rel_rows(
     rels.into_iter()
         .map(|rel| {
             let is_person1 = &rel.person1_id == focused_pid;
-            let other_id = if is_person1 {
-                &rel.person2_id
-            } else {
-                &rel.person1_id
-            };
+            let other_id = if is_person1 { &rel.person2_id } else { &rel.person1_id };
 
             let other_name = people_cache
                 .iter()
@@ -257,7 +370,7 @@ fn build_person_rel_rows(
                 (RelationshipType::Foster, false) => "Foster child of",
             };
 
-            (label.to_string(), other_name)
+            (label.to_string(), other_name, rel.id.clone())
         })
         .collect()
 }

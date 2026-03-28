@@ -5,9 +5,10 @@ use colored::Colorize;
 use kinforge_app::Application;
 use kinforge_core::models::{EventDate, EventType};
 use kinforge_reports::{
-    ancestor_report, descendant_report, family_group_sheet, global_timeline_report,
-    individual_report, narrative_report, people_list_report, places_report, sources_report,
-    summary_report, timeline_report,
+    ancestor_report, anniversary_report, birthdays_report, census_report, completeness_report,
+    descendant_report, family_group_sheet, global_timeline_report, individual_report,
+    missing_data_report, narrative_report, people_list_report, places_report, sources_report,
+    summary_report, surnames_report, timeline_report,
 };
 use kinforge_viz::{ascii_ancestor_tree, ascii_family_tree};
 use std::collections::HashMap;
@@ -74,6 +75,22 @@ pub enum ReportCommands {
         /// Limit to this many events (default: 200)
         #[arg(long, default_value = "200")]
         limit: usize,
+    },
+    /// Annual birthday reference — all people with known birth month and day, sorted by month/day
+    Birthdays,
+    /// US census snapshots (1790–1940) — people likely alive at each census year
+    Census,
+    /// People missing key data: no birth date, unknown sex, or no events
+    MissingData,
+    /// Surname frequency table with birth-decade ranges
+    Surnames,
+    /// Per-person completeness score (birth date, sex, relationships, citations, etc.)
+    Completeness,
+    /// Upcoming birthdays and anniversaries within N days (default: 365)
+    Anniversary {
+        /// Number of days to look ahead
+        #[arg(long, default_value = "365")]
+        days: u32,
     },
 }
 
@@ -241,6 +258,24 @@ pub fn handle(cmd: ReportCommands, app: &Application) -> Result<()> {
         }
         ReportCommands::GlobalTimeline { limit } => {
             print!("{}", global_timeline_report(app.database(), limit)?);
+        }
+        ReportCommands::Birthdays => {
+            print!("{}", birthdays_report(app.database())?);
+        }
+        ReportCommands::Census => {
+            print!("{}", census_report(app.database())?);
+        }
+        ReportCommands::MissingData => {
+            print!("{}", missing_data_report(app.database())?);
+        }
+        ReportCommands::Surnames => {
+            print!("{}", surnames_report(app.database())?);
+        }
+        ReportCommands::Completeness => {
+            print!("{}", completeness_report(app.database())?);
+        }
+        ReportCommands::Anniversary { days } => {
+            print!("{}", anniversary_report(app.database(), days)?);
         }
     }
     Ok(())

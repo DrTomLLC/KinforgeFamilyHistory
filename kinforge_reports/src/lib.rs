@@ -1380,3 +1380,558 @@ pub fn summary_report(db: &Database) -> KinforgeResult<String> {
 
     Ok(out)
 }
+
+// ─── census report ───────────────────────────────────────────────────────────
+
+/// Snapshot of people likely alive at each US decennial census year 1790–1940.
+///
+/// "Likely alive" = born on or before the census year AND (no death event, OR
+/// death year >= census year).
+pub fn census_report(db: &Database) -> KinforgeResult<String> {
+    use chrono::Datelike;
+
+    const CENSUS_YEARS: &[i32] = &[
+        1790, 1800, 1810, 1820, 1830, 1840, 1850, 1860,
+        1870, 1880, 1890, 1900, 1910, 1920, 1930, 1940,
+    ];
+
+    let people = db.list_people()?;
+
+    // For each person, gather birth year and death year from their events
+    struct PersonSnapshot {
+        name: String,
+        birth_year: Option<i32>,
+        death_year: Option<i32>,
+    }
+
+    let mut snapshots: Vec<PersonSnapshot> = Vec::with_capacity(people.len());
+    for person in &people {
+        let events = db.list_events_for_person(&person.id)?;
+        let birth_year = events.iter()
+            .find(|e| matches!(e.event_type, EventType::Birth))
+            .and_then(|e| e.date.as_ref())
+            .and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                _ => None,
+            });
+        let death_year = events.iter()
+            .find(|e| matches!(e.event_type, EventType::Death))
+            .and_then(|e| e.date.as_ref())
+            .and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                _ => None,
+            });
+        snapshots.push(PersonSnapshot {
+            name: person.display_name(),
+            birth_year,
+            death_year,
+        });
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        "  US Census Snapshots (1790–1940)  ".bold().bright_cyan().on_black(),
+        "─".repeat(38).bright_black()
+    ));
+
+    for &year in CENSUS_YEARS {
+        let alive: Vec<&PersonSnapshot> = snapshots.iter()
+            .filter(|p| {
+                let born_before = p.birth_year.map(|by| by <= year).unwrap_or(false);
+                let not_dead = p.death_year.map(|dy| dy >= year).unwrap_or(true);
+                born_before && not_dead
+            })
+            .collect();
+
+        if alive.is_empty() {
+            continue;
+        }
+
+        out.push_str(&format!(
+            "  {} {}\n",
+            year.to_string().bold().cyan(),
+            format!("({} people)", alive.len()).bright_black()
+        ));
+        for p in &alive {
+            let birth = p.birth_year.map(|y| format!("b.{}", y)).unwrap_or_default();
+            let death = p.death_year.map(|y| format!(" d.{}", y)).unwrap_or_default();
+            out.push_str(&format!(
+                "    {}  {}{}\n",
+                p.name.bold(),
+                birth.bright_black(),
+                death.bright_black()
+            ));
+        }
+        out.push('\n');
+    }
+
+    if out.lines().count() <= 3 {
+        out.push_str(&format!("  {}\n", "(no people with birth years in 1790–1940 range)".bright_black()));
+    }
+
+    Ok(out)
+}
+
+// ─── birthdays report ────────────────────────────────────────────────────────
+
+/// Annual birthday reference: all people with known birth month+day, sorted by month then day.
+pub fn birthdays_report(db: &Database) -> KinforgeResult<String> {
+    use chrono::Datelike;
+
+    let people = db.list_people()?;
+    let mut entries: Vec<(u32, u32, i32, String, Option<String>)> = Vec::new();
+    // (month, day, birth_year, display_name, place_name)
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id)?;
+        if let Some(birth) = events.iter().find(|e| matches!(e.event_type, EventType::Birth)) {
+            if let Some(nd) = birth.date.as_ref().and_then(|d| match d {
+                EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(*nd),
+                _ => None,
+            }) {
+                let place_name = birth.place_id.as_ref()
+                    .and_then(|pid| db.get_place(pid).ok())
+                    .map(|pl| pl.name);
+                entries.push((nd.month(), nd.day(), nd.year(), person.display_name(), place_name));
+            }
+        }
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+
+    let month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ];
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Birthdays ({} with known date)  ", entries.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(38).bright_black()
+    ));
+
+    if entries.is_empty() {
+        out.push_str(&format!("  {}\n", "(no birth dates recorded)".bright_black()));
+        return Ok(out);
+    }
+
+    let mut current_month = 0u32;
+    for (month, day, year, name, place) in &entries {
+        if *month != current_month {
+            current_month = *month;
+            out.push_str(&format!("\n  {}\n", month_names[*month as usize].bold().cyan()));
+        }
+        let place_str = place.as_deref()
+            .map(|p| format!("  @ {}", p.green()))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "    {:>2}  {}  {}{}\n",
+            day.to_string().yellow().bold(),
+            name.bold(),
+            year.to_string().bright_black(),
+            place_str
+        ));
+    }
+
+    Ok(out)
+}
+
+// ─── missing data report ────────────────────────────────────────────────────
+
+/// People missing key genealogical data: no birth date, unknown sex, or no
+/// events at all.
+pub fn missing_data_report(db: &Database) -> KinforgeResult<String> {
+    let people = db.list_people()?;
+
+    struct Row {
+        name: String,
+        issues: Vec<&'static str>,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id).unwrap_or_default();
+        let mut issues: Vec<&'static str> = Vec::new();
+
+        if events.is_empty() {
+            issues.push("no events");
+        } else {
+            let has_birth_date = events.iter().any(|e| {
+                matches!(e.event_type, EventType::Birth) && e.date.is_some()
+            });
+            if !has_birth_date {
+                issues.push("no birth date");
+            }
+        }
+
+        if matches!(person.sex, Sex::Unknown) {
+            issues.push("unknown sex");
+        }
+
+        if !issues.is_empty() {
+            rows.push(Row { name: person.display_name(), issues });
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Missing Data ({} people with gaps)  ", rows.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(42).bright_black()
+    ));
+
+    if rows.is_empty() {
+        out.push_str(&format!("  {}\n", "All people have complete data.".green()));
+        return Ok(out);
+    }
+
+    for row in &rows {
+        let issues_str = row.issues.join(", ");
+        out.push_str(&format!(
+            "  {}  {}\n",
+            row.name.bold(),
+            issues_str.yellow()
+        ));
+    }
+
+    Ok(out)
+}
+
+// ─── surnames report ────────────────────────────────────────────────────────
+
+/// Surname frequency analysis with decade ranges of birth years.
+pub fn surnames_report(db: &Database) -> KinforgeResult<String> {
+    use chrono::Datelike;
+    use std::collections::HashMap;
+
+    let people = db.list_people()?;
+
+    // surname → (count, birth years) — count is people, years for decade range
+    let mut surname_data: HashMap<String, (usize, Vec<i32>)> = HashMap::new();
+
+    for person in &people {
+        let surname = person.names.first()
+            .and_then(|n| n.surname.as_deref())
+            .map(|s| s.to_string());
+
+        if let Some(sn) = surname {
+            if sn.is_empty() { continue; }
+            let events = db.list_events_for_person(&person.id).unwrap_or_default();
+            let birth_year: Option<i32> = events.iter()
+                .find(|e| matches!(e.event_type, EventType::Birth))
+                .and_then(|e| e.date.as_ref())
+                .and_then(|d| match d {
+                    EventDate::Exact(nd) | EventDate::Approximate(nd) => Some(nd.year()),
+                    _ => None,
+                });
+            let entry = surname_data.entry(sn).or_default();
+            entry.0 += 1;
+            if let Some(y) = birth_year {
+                entry.1.push(y);
+            }
+        }
+    }
+
+    // sort by frequency desc, then name asc
+    let mut surnames: Vec<(&String, &(usize, Vec<i32>))> = surname_data.iter().collect();
+    surnames.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(a.0.cmp(b.0)));
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Surnames ({} distinct)  ", surnames.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(36).bright_black()
+    ));
+
+    if surnames.is_empty() {
+        out.push_str(&format!("  {}\n", "(no surnames recorded)".bright_black()));
+        return Ok(out);
+    }
+
+    for (surname, (count, years)) in &surnames {
+        let decade_range = if years.is_empty() {
+            String::new()
+        } else {
+            let min_d = (years.iter().min().unwrap() / 10) * 10;
+            let max_d = (years.iter().max().unwrap() / 10) * 10;
+            if min_d == max_d {
+                format!("  {}s", min_d.to_string().bright_black())
+            } else {
+                format!("  {}s\u{2013}{}s",
+                    min_d.to_string().bright_black(),
+                    max_d.to_string().bright_black())
+            }
+        };
+        out.push_str(&format!(
+            "  {:>4}  {}{}\n",
+            count.to_string().yellow().bold(),
+            surname.bold(),
+            decade_range
+        ));
+    }
+
+    Ok(out)
+}
+
+// ─── completeness report ────────────────────────────────────────────────────
+
+/// Per-person completeness scoring (0–10 pts), sorted lowest-first.
+///
+/// Points awarded:
+///   2 — has birth date
+///   1 — has birth place
+///   1 — has known sex (not Unknown)
+///   2 — has death date (only if a death event exists)
+///   1 — has at least one relationship
+///   2 — has at least one citation on any event
+pub fn completeness_report(db: &Database) -> KinforgeResult<String> {
+    let people = db.list_people()?;
+
+    struct Entry {
+        name: String,
+        score: u8,
+        max: u8,
+        missing: Vec<&'static str>,
+    }
+
+    let mut entries: Vec<Entry> = Vec::new();
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id).unwrap_or_default();
+        let rels = db.list_relationships_for_person(&person.id).unwrap_or_default();
+
+        let mut score = 0u8;
+        let mut max = 8u8; // birth date (2) + birth place (1) + sex (1) + rels (1) + citations (2) + death date (2 if applicable)
+        let mut missing: Vec<&'static str> = Vec::new();
+
+        // Birth date (2 pts)
+        let birth_evt = events.iter().find(|e| matches!(e.event_type, EventType::Birth));
+        if birth_evt.map(|e| e.date.is_some()).unwrap_or(false) {
+            score += 2;
+        } else {
+            missing.push("birth date");
+        }
+
+        // Birth place (1 pt)
+        if birth_evt.map(|e| e.place_id.is_some()).unwrap_or(false) {
+            score += 1;
+        } else {
+            missing.push("birth place");
+        }
+
+        // Known sex (1 pt)
+        if !matches!(person.sex, Sex::Unknown) {
+            score += 1;
+        } else {
+            missing.push("known sex");
+        }
+
+        // Death date (2 pts) — only if a death event exists
+        let death_evt = events.iter().find(|e| matches!(e.event_type, EventType::Death));
+        if let Some(death) = death_evt {
+            max += 2;
+            if death.date.is_some() {
+                score += 2;
+            } else {
+                missing.push("death date");
+            }
+        }
+
+        // Has relationship (1 pt)
+        if !rels.is_empty() {
+            score += 1;
+        } else {
+            missing.push("relationships");
+        }
+
+        // Has citation on any event (2 pts)
+        let has_citation = events.iter().any(|e| {
+            db.list_citations_for_event(&e.id)
+                .map(|c| !c.is_empty())
+                .unwrap_or(false)
+        });
+        if has_citation {
+            score += 2;
+        } else {
+            missing.push("source citations");
+        }
+
+        entries.push(Entry {
+            name: person.display_name(),
+            score,
+            max,
+            missing,
+        });
+    }
+
+    // Sort by score ascending (most incomplete first), then name
+    entries.sort_by(|a, b| {
+        let pct_a = (a.score as f32) / (a.max as f32);
+        let pct_b = (b.score as f32) / (b.max as f32);
+        pct_a.partial_cmp(&pct_b).unwrap().then(a.name.cmp(&b.name))
+    });
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Completeness ({} people)  ", entries.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(38).bright_black()
+    ));
+
+    if entries.is_empty() {
+        out.push_str(&format!("  {}\n", "(no people in database)".bright_black()));
+        return Ok(out);
+    }
+
+    for entry in &entries {
+        let pct = (entry.score as f32 / entry.max as f32 * 100.0) as u8;
+        let bar_len = (pct as usize * 20) / 100;
+        let bar = format!(
+            "{}{}",
+            "\u{2588}".repeat(bar_len),
+            "\u{2591}".repeat(20 - bar_len)
+        );
+        let bar_styled = if pct >= 80 {
+            bar.green()
+        } else if pct >= 50 {
+            bar.yellow()
+        } else {
+            bar.red()
+        };
+        let missing_str = if entry.missing.is_empty() {
+            String::new()
+        } else {
+            format!("  missing: {}", entry.missing.join(", ").bright_black())
+        };
+        out.push_str(&format!(
+            "  {} {:>3}%  {}  {}{}\n",
+            entry.name.bold(),
+            pct.to_string().yellow(),
+            bar_styled,
+            format!("{}/{}", entry.score, entry.max).bright_black(),
+            missing_str
+        ));
+    }
+
+    Ok(out)
+}
+
+// ─── anniversary report ─────────────────────────────────────────────────────
+
+/// Upcoming anniversaries within `days` days from today (default 365).
+///
+/// Scans all birth and marriage events; computes next occurrence of the
+/// month/day in the current or next calendar year, then filters to those
+/// within the requested window.  Results are sorted by days-until ascending.
+pub fn anniversary_report(db: &Database, days: u32) -> KinforgeResult<String> {
+    use chrono::{Datelike, Local};
+
+    let today = Local::now().date_naive();
+    let window_end = today + chrono::Duration::days(days as i64);
+
+    #[derive(Clone)]
+    struct Hit {
+        days_until: i64,
+        name: String,
+        event_type: String,
+        original_year: i32,
+        month: u32,
+        day: u32,
+    }
+
+    let interesting: &[EventType] = &[EventType::Birth, EventType::Marriage];
+    let people = db.list_people()?;
+    let mut hits: Vec<Hit> = Vec::new();
+
+    for person in &people {
+        let events = db.list_events_for_person(&person.id).unwrap_or_default();
+        for event in &events {
+            if !interesting.contains(&event.event_type) {
+                continue;
+            }
+            let (month, day, orig_year) = match &event.date {
+                Some(EventDate::Exact(nd)) | Some(EventDate::Approximate(nd)) => {
+                    (nd.month(), nd.day(), nd.year())
+                }
+                _ => continue,
+            };
+
+            // Next occurrence this calendar year or next
+            let this_year = today.year();
+            let candidate = NaiveDate::from_ymd_opt(this_year, month, day)
+                .unwrap_or_else(|| NaiveDate::from_ymd_opt(this_year, month, day - 1).unwrap());
+            let next_occ = if candidate >= today {
+                candidate
+            } else {
+                NaiveDate::from_ymd_opt(this_year + 1, month, day)
+                    .unwrap_or_else(|| NaiveDate::from_ymd_opt(this_year + 1, month, day - 1).unwrap())
+            };
+
+            if next_occ <= window_end {
+                let days_until = (next_occ - today).num_days();
+                hits.push(Hit {
+                    days_until,
+                    name: person.display_name(),
+                    event_type: event.event_type.to_string(),
+                    original_year: orig_year,
+                    month,
+                    day,
+                });
+            }
+        }
+    }
+
+    hits.sort_by_key(|h| h.days_until);
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n{}\n\n",
+        format!("  Upcoming Anniversaries — next {} days ({} found)  ", days, hits.len())
+            .bold().bright_cyan().on_black(),
+        "─".repeat(52).bright_black()
+    ));
+
+    if hits.is_empty() {
+        out.push_str(&format!("  {}\n", "(none found in window)".bright_black()));
+        return Ok(out);
+    }
+
+    let month_names = [
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+
+    for hit in &hits {
+        let in_label = if hit.days_until == 0 {
+            "today".green().bold().to_string()
+        } else if hit.days_until == 1 {
+            "tomorrow".yellow().to_string()
+        } else {
+            format!("{} days", hit.days_until).normal().to_string()
+        };
+        let years_since = today.year() - hit.original_year;
+        let yrs_label = if years_since > 0 {
+            format!("  ({}yr)", years_since).bright_black().to_string()
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "  {:>9}  {} {:>2}  {}  {}{}\n",
+            in_label,
+            month_names[hit.month as usize].cyan(),
+            hit.day.to_string().cyan(),
+            hit.name.bold(),
+            hit.event_type.bright_black(),
+            yrs_label
+        ));
+    }
+
+    Ok(out)
+}
