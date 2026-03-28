@@ -1388,6 +1388,7 @@ dependencies = [
  "kinforge_query",
  "kinforge_reports",
  "kinforge_storage",
+ "kinforge_sync",
  "kinforge_viz",
  "ratatui",
 ]
@@ -1468,7 +1469,14 @@ dependencies = [
 name = "kinforge_sync"
 version = "1.3.0"
 dependencies = [
+ "chrono",
+ "kinforge_app",
  "kinforge_core",
+ "kinforge_import_export",
+ "kinforge_storage",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

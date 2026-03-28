@@ -1,8 +1,8 @@
 # Kinforge Family History — Project Documentation
 
 > **Last updated:** 2026-03-28
-> **Build status:** 117 tests passing · 0 warnings · `cargo build --workspace` clean
-> **Version:** 1.13.0
+> **Build status:** 122 tests passing · 0 warnings · `cargo build --workspace` clean
+> **Version:** 1.14.0
 
 ---
 
@@ -104,8 +104,11 @@ Key design principles:
 | TUI: `N` in Tasks tab — edit task notes via popup | ✅ Complete | 2 tests |
 | `kinforge report anniversary [--days N]` — upcoming birth/marriage anniversaries | ✅ Complete | 3 tests |
 | Sync crate skeleton | ✅ Skeleton present | — |
+| Plugin API (built-in plugins, `ConsoleLogPlugin`, `EventCounterPlugin`) | ✅ Complete | 2 tests |
+| Desktop GUI (`kinforge-desktop`, egui/eframe) | ✅ Complete | — |
+| Cloud/file sync (`kinforge sync push/pull/status`) | ✅ Complete | 5 tests |
 
-**Total: 117 tests passing, 0 failures, 0 warnings**
+**Total: 122 tests passing, 0 failures, 0 warnings**
 
 ---
 
@@ -122,7 +125,8 @@ For one person to use Kinforge productively right now:
 - [x] Attach media (photos, documents) to people, events, or sources
 - [x] Run reports on individuals, ancestors (with Ahnentafel numbers), descendants, narrative biography
 - [x] Track research tasks with priorities, statuses, and person links
-- [x] Browse your data interactively with `kinforge tui`
+- [x] Browse your data interactively with `kinforge tui` (or `kinforge-desktop` for the native GUI)
+- [x] Sync data between devices via a shared directory (`kinforge sync push/pull/status`)
 - [x] Search your database by name, notes, or full-text across all entities
 - [x] Find the relationship path between any two people
 - [x] Export your data to GEDCOM (importable into Ancestry, FamilySearch, etc.)
@@ -249,6 +253,11 @@ kinforge import gedcom existing_family.ged
 
 # Run integrity check
 kinforge check
+
+# Sync to a shared directory (push local data, pull remote changes)
+kinforge sync push ~/Dropbox/kinforge-sync --device-id "my-laptop"
+kinforge sync status ~/Dropbox/kinforge-sync
+kinforge sync pull ~/Dropbox/kinforge-sync
 ```
 
 ---
@@ -508,6 +517,40 @@ kinforge backup create
 
 Backups are stored in a `backups/` subdirectory next to the database file, named `<stem>_<timestamp>.db`.
 
+### `sync`
+
+```
+kinforge sync push <DIR> [--device-id <ID>]
+kinforge sync pull <DIR>
+kinforge sync status <DIR>
+```
+
+Sync data between machines (or between locations on the same machine) via a shared directory — a USB drive, Dropbox folder, network share, or any folder you can write to from multiple devices.
+
+**How it works (additive-only merge):**
+
+- `push` exports a full JSON snapshot of your database to `<DIR>/kinforge_export.json` and writes metadata to `<DIR>/kinforge_manifest.json`.
+- `pull` reads the snapshot from the directory and inserts any records whose UUID does not already exist locally. **Existing records are never overwritten or deleted.**
+- `status` compares your local database counts against the manifest without modifying anything.
+
+**Workflow example (two machines sharing a Dropbox folder):**
+
+```bash
+# Machine A — push your data
+kinforge sync push ~/Dropbox/kinforge-sync --device-id "macbook-alice"
+
+# Machine B — pull Alice's changes
+kinforge sync pull ~/Dropbox/kinforge-sync
+
+# Machine B — check what has changed before pulling
+kinforge sync status ~/Dropbox/kinforge-sync
+```
+
+**Notes:**
+- The sync is safe to run repeatedly — already-present records are counted as `duplicates_skipped`.
+- `--device-id` is a stable label for the machine that pushed; it appears in `status` output so you know which device last wrote to the directory. Defaults to `"local"`.
+- For bidirectional sync, both machines should push and pull. Because the merge is additive, changes from both sides accumulate safely.
+
 ### `check`
 
 ```
@@ -609,9 +652,9 @@ kinforge_reports       — text report generators (individual, ancestors, narrat
 kinforge_viz           — ASCII tree renderers (family tree, ancestor tree)
 kinforge_app           — Application facade: CRUD, search, tasks, path-finding, integrity
 kinforge_cli           — clap CLI (binary) + ratatui TUI
-kinforge_plugin_api    — plugin trait skeleton (future extensibility)
-kinforge_sync          — sync/replication skeleton (not yet implemented)
-kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
+kinforge_plugin_api    — plugin trait + built-in plugins (ConsoleLogPlugin, EventCounterPlugin)
+kinforge_sync          — file-based sync (push/pull/status with additive merge, manifest)
+kinforge_ui_desktop    — desktop GUI (egui/eframe: people list, detail panels, stats sidebar)
 ```
 
 ### Schema versions
@@ -629,8 +672,8 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 
 | Feature | Notes |
 |---------|-------|
-| Cloud/peer sync | `kinforge_sync` stub only — planned as the final phase |
 | Dynamic plugin loading from .so/.dll | Plugin trait and built-in plugins complete; runtime dylib loading not yet implemented |
+| Network/cloud sync backend | File-system sync complete; network (SSH/S3/WebDAV) backends are extension points via `SyncBackend` trait |
 
 ---
 
@@ -731,5 +774,13 @@ kinforge_ui_desktop    — desktop GUI skeleton (not yet implemented)
 - [x] TUI: `Enter` in Tasks tab — toggle task detail panel (status, priority, full description, notes, created date)
 - [x] `kinforge report birthdays` — annual birthday reference sorted by month/day
 
-**Future (Cloud Sync — final phase):**
-- [ ] Optional sync between devices (`kinforge_sync`)
+**v1.14.0 (Phase 28 — final planned phase):**
+- [x] `kinforge sync push <dir> [--device-id ID]` — export full DB to JSON + write manifest
+- [x] `kinforge sync pull <dir>` — additive import (existing UUIDs skipped, never overwritten)
+- [x] `kinforge sync status <dir>` — compare local counts vs remote manifest; hints for push/pull
+- [x] `SyncManifest` JSON (device_id, pushed_at, export_version, per-entity counts)
+- [x] `FileSyncBackend` implementing `SyncBackend` trait (extension point for future network backends)
+- [x] 5 integration tests for sync (push creates files, manifest round-trip, pull imports, additive no-dups, status remote counts)
+- [x] Integration tests: 122 total (117 → 122)
+
+**All planned phases complete. Kinforge Family History is feature-complete.**

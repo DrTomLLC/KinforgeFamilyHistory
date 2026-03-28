@@ -11,7 +11,7 @@ use commands::{
     export::ExportCommands, import::ImportCommands, media::MediaCommands,
     person::PersonCommands, place::PlaceCommands, plugin::PluginCommands,
     relationship::RelationshipCommands, report::ReportCommands, search::SearchCommands,
-    source::SourceCommands, task::TaskCommands,
+    source::SourceCommands, sync::SyncCommands, task::TaskCommands,
 };
 
 #[derive(Parser)]
@@ -115,6 +115,10 @@ enum Commands {
     /// List and manage Kinforge plugins
     #[command(subcommand)]
     Plugin(PluginCommands),
+
+    /// Sync data to/from a shared directory (push, pull, status)
+    #[command(subcommand)]
+    Sync(SyncCommands),
 }
 
 fn main() -> Result<()> {
@@ -157,6 +161,7 @@ fn main() -> Result<()> {
         Commands::Check => commands::check::handle(&app)?,
         Commands::Backup(cmd) => commands::backup::handle(cmd, &app)?,
         Commands::Plugin(cmd) => commands::plugin::handle(cmd)?,
+        Commands::Sync(cmd) => commands::sync::handle(cmd, &app)?,
         Commands::Config(_) => unreachable!(),
     }
 
